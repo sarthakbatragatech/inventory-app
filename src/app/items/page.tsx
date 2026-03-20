@@ -269,7 +269,7 @@ export default function ItemsPage() {
             <Link
               key={item.id}
               href={`/items/${item.id}`}
-              className="block rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:border-neutral-300"
+              className="block rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:shadow-md"
             >
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -291,8 +291,11 @@ export default function ItemsPage() {
                 </span>
               </div>
 
-              <div className="mb-4 break-words text-sm font-medium text-neutral-800">
+              <div className="mb-2 break-words text-sm font-semibold text-sky-700 underline decoration-sky-300 underline-offset-4">
                 {item.sku}
+              </div>
+              <div className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-sky-600">
+                Tap to view details
               </div>
 
               <div className="grid grid-cols-2 gap-3 rounded-2xl bg-neutral-50 p-3">
@@ -364,11 +367,11 @@ export default function ItemsPage() {
 
             <tbody>
               {sortedItems.map((item) => (
-                <tr key={item.id} className="border-t border-neutral-200">
+                <tr key={item.id} className="border-t border-neutral-200 transition hover:bg-sky-50/70">
                   <td className="px-4 py-3 font-medium text-neutral-700">
                     <Link
                       href={`/items/${item.id}`}
-                      className="text-neutral-900 underline decoration-neutral-300 underline-offset-4 transition hover:decoration-neutral-900"
+                      className="font-semibold text-sky-700 underline decoration-sky-300 underline-offset-4 transition hover:text-sky-800 hover:decoration-sky-600"
                     >
                       {item.sku}
                     </Link>
