@@ -42,10 +42,12 @@ type ImportRowRecord = {
   unit: string | null;
   color: string | null;
   inward_date: string | null;
+  raw_payload: Record<string, unknown> | null;
 };
 
 type HistoryRow = ImportRowRecord & {
   displayUnit: string | null;
+  supplier: string | null;
   batch: BatchRecord | null;
 };
 
@@ -107,6 +109,17 @@ function getCategoryStyles(category: string | null) {
   }
 }
 
+function extractSupplier(rawPayload: Record<string, unknown> | null): string | null {
+  if (!rawPayload) {
+    return null;
+  }
+
+  const candidate = rawPayload['Supplier'] ?? rawPayload['supplier'] ?? rawPayload['Vendor'] ?? rawPayload['vendor'] ?? null;
+  const normalized = typeof candidate === 'string' ? candidate.trim() : String(candidate ?? '').trim();
+
+  return normalized || null;
+}
+
 export default async function ItemPage({ params }: PageProps) {
   const { id } = await params;
   const supabase = getSupabaseServerClient();
@@ -164,7 +177,7 @@ export default async function ItemPage({ params }: PageProps) {
     const { data, error } = await supabase
       .from('import_batch_rows')
       .select(
-        'batch_id, raw_row_no, raw_item_name, quantity, unit, color, inward_date'
+        'batch_id, raw_row_no, raw_item_name, quantity, unit, color, inward_date, raw_payload'
       )
       .eq('item_id', id)
       .in('batch_id', batchChunk);
@@ -192,6 +205,7 @@ export default async function ItemPage({ params }: PageProps) {
     .map((row) => ({
       ...row,
       displayUnit: normalizeDisplayUnit(row.unit),
+      supplier: extractSupplier(row.raw_payload),
       batch: batchById.get(row.batch_id) ?? null,
     }));
 
@@ -215,6 +229,7 @@ export default async function ItemPage({ params }: PageProps) {
   const families = familyByItemId.get(currentItem.id) ?? (derivedFamily ? [derivedFamily] : []);
   const primaryFamily = families[0] ?? null;
   const sharedFamilies = families.slice(1);
+  const suppliers = [...new Set(historyRows.map((row) => row.supplier).filter((value): value is string => Boolean(value)))];
 
   return (
     <div className="min-h-screen bg-neutral-50 p-6">
@@ -253,6 +268,11 @@ export default async function ItemPage({ params }: PageProps) {
                   {sharedFamilies.length ? (
                     <span className="inline-flex rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-700">
                       Shared Families: {sharedFamilies.join(', ')}
+                    </span>
+                  ) : null}
+                  {suppliers.length ? (
+                    <span className="inline-flex rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-700">
+                      Suppliers: {suppliers.join(', ')}
                     </span>
                   ) : null}
                   <span
@@ -345,6 +365,7 @@ export default async function ItemPage({ params }: PageProps) {
                 <tr>
                   <th className="px-4 py-3 font-semibold">Date</th>
                   <th className="px-4 py-3 font-semibold">Quantity</th>
+                  <th className="px-4 py-3 font-semibold">Supplier</th>
                   <th className="px-4 py-3 font-semibold">Color / Type</th>
                   <th className="px-4 py-3 font-semibold">Imported As</th>
                   <th className="px-4 py-3 font-semibold">Source File</th>
@@ -361,6 +382,7 @@ export default async function ItemPage({ params }: PageProps) {
                         ? formatQuantity(row.quantity, row.displayUnit)
                         : '—'}
                     </td>
+                    <td className="px-4 py-3 text-neutral-700">{row.supplier || '—'}</td>
                     <td className="px-4 py-3 text-neutral-700">{row.color || '—'}</td>
                     <td className="px-4 py-3 text-neutral-700">{row.raw_item_name || '—'}</td>
                     <td className="px-4 py-3 text-neutral-700">
