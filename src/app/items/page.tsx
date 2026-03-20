@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 
 interface Item {
   id: string;
@@ -9,6 +10,7 @@ interface Item {
   item_name: string;
   category: string | null;
   family: string | null;
+  families: string[];
   default_unit: string | null;
   created_at: string;
   totalQty: number;
@@ -68,6 +70,29 @@ function formatInwardDate(value: string) {
 
 function compareText(a: string | null, b: string | null) {
   return (a || '').localeCompare(b || '');
+}
+
+function renderFamilySummary(family: string | null, families: string[]): ReactNode {
+  if (families.length === 1) {
+    return families[0];
+  }
+
+  if (families.length > 1) {
+    return (
+      <span className="inline-flex items-baseline gap-1">
+        <span>{families[0]}</span>
+        <span
+          className="font-bold text-sky-700"
+          title={families.slice(1).join(', ')}
+          aria-label={`${families.length - 1} shared ${families.length - 1 === 1 ? 'family' : 'families'}`}
+        >
+          +{families.length - 1}*
+        </span>
+      </span>
+    );
+  }
+
+  return family || '—';
 }
 
 async function requestItems(
@@ -274,7 +299,7 @@ export default function ItemsPage() {
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-600">
-                    {item.family || 'Unassigned Family'}
+                    {renderFamilySummary(item.family, item.families) || 'Unassigned Family'}
                   </div>
                   <div className="mt-2 break-words text-lg font-semibold leading-7 text-neutral-950">
                     {item.item_name}
@@ -377,7 +402,7 @@ export default function ItemsPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3">{item.item_name}</td>
-                  <td className="px-4 py-3">{item.family || '—'}</td>
+                  <td className="px-4 py-3">{renderFamilySummary(item.family, item.families)}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${

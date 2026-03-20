@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveItemFamily } from '@/lib/item-family';
+import { resolveItemFamilies } from '@/lib/item-family-links';
 import { getSupabaseServerClient } from '@/lib/supabase';
 
 type BatchRecord = {
@@ -155,7 +156,6 @@ export async function GET(req: NextRequest) {
           rowUnits.length === 1
             ? rowUnits[0]
             : normalizeDisplayUnit(item.default_unit),
-        family: item.family || deriveItemFamily(item.item_name, item.sku),
         totalQty,
         lastInward: lastInward?.inward_date ?? null,
         lastInwardQty: lastInward?.quantity ?? null,
@@ -165,10 +165,23 @@ export async function GET(req: NextRequest) {
     })
     .filter((item) => item.totalQty > 0);
 
+  const { familyByItemId } = await resolveItemFamilies(enrichedItems);
+
+  const itemsWithFamilies = enrichedItems.map((item) => {
+    const families = familyByItemId.get(item.id) ?? [];
+    const fallbackFamily = item.family || deriveItemFamily(item.item_name, item.sku);
+
+    return {
+      ...item,
+      family: families[0] || fallbackFamily,
+      families: families.length ? families : fallbackFamily ? [fallbackFamily] : [],
+    };
+  });
+
   const familyOptions = [
     ...new Set(
-      enrichedItems
-        .map((item) => item.family)
+      itemsWithFamilies
+        .flatMap((item) => item.families)
         .filter((family): family is string => Boolean(family))
     ),
   ].sort((a, b) => a.localeCompare(b));
@@ -181,8 +194,8 @@ export async function GET(req: NextRequest) {
     ),
   ].sort((a, b) => a.localeCompare(b));
 
-  const filteredItems = enrichedItems.filter((item) => {
-    if (familyFilter && item.family !== familyFilter) {
+  const filteredItems = itemsWithFamilies.filter((item) => {
+    if (familyFilter && !item.families.includes(familyFilter)) {
       return false;
     }
 

@@ -17,6 +17,7 @@ type AliasRecord = {
 type ItemRecord = {
   id: string;
   normalized_name: string;
+  family?: string | null;
 };
 
 type ItemQuantityProfile = {
@@ -251,10 +252,10 @@ async function insertMissingItems(
 
   const supabase = getSupabaseServerClient();
   const payload = normalizedItemNames.map((normalizedItemName) => ({
+    family: resolveItemFamilyCode(normalizedItemName, validFamilyCodes),
     sku: createTemporarySku(normalizedItemName),
     item_name: normalizedItemName,
     normalized_name: normalizedItemName,
-    family: resolveItemFamilyCode(normalizedItemName, validFamilyCodes),
     category: DEFAULT_ITEM_CATEGORY,
     default_unit:
       defaultUnitByNormalizedName.get(normalizedItemName) ?? DEFAULT_ITEM_UNIT,
@@ -266,7 +267,7 @@ async function insertMissingItems(
     const { data, error } = await supabase
       .from('items')
       .insert(chunk)
-      .select('id, normalized_name');
+      .select('id, normalized_name, family');
 
     if (error) {
       throw new Error(`Item insert failed: ${error.message}`);
@@ -276,6 +277,40 @@ async function insertMissingItems(
   }
 
   return insertedItems;
+}
+
+async function upsertPrimaryItemFamilyLinks(items: ItemRecord[]) {
+  const payload = items
+    .filter((item) => item.family)
+    .map((item) => ({
+      item_id: item.id,
+      family_code: item.family as string,
+      is_primary: true,
+    }));
+
+  if (!payload.length) {
+    return;
+  }
+
+  const supabase = getSupabaseServerClient();
+  const { error } = await supabase
+    .from('item_family_links')
+    .upsert(payload, { onConflict: 'item_id,family_code' });
+
+  if (!error) {
+    return;
+  }
+
+  if (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    error.message.includes('item_family_links') ||
+    error.message.includes('does not exist')
+  ) {
+    return;
+  }
+
+  throw new Error(`Item family link insert failed: ${error.message}`);
 }
 
 async function upsertAliases(aliasRows: Array<{ alias: string; item_id: string }>) {
@@ -452,6 +487,8 @@ export async function POST(req: NextRequest) {
       defaultUnitByNormalizedName,
       validFamilyCodes
     );
+    await upsertPrimaryItemFamilyLinks(insertedItems);
+
     for (const item of insertedItems) {
       itemIdByNormalizedName.set(
         normalizedComparisonKey(item.normalized_name),

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { InwardTrendChart } from '@/components/items/inward-trend-chart';
 import { deriveItemFamily } from '@/lib/item-family';
+import { resolveItemFamilies } from '@/lib/item-family-links';
 import { getSupabaseServerClient } from '@/lib/supabase';
 
 type PageProps = {
@@ -208,8 +209,12 @@ export default async function ItemPage({ params }: PageProps) {
       ? rowUnits[0]
       : normalizeDisplayUnit(currentItem.default_unit);
   const aliasesList = ((aliases ?? []) as AliasRecord[]).map((record) => record.alias);
-  const family =
+  const { familyByItemId } = await resolveItemFamilies([currentItem]);
+  const derivedFamily =
     currentItem.family || deriveItemFamily(currentItem.item_name, currentItem.sku);
+  const families = familyByItemId.get(currentItem.id) ?? (derivedFamily ? [derivedFamily] : []);
+  const primaryFamily = families[0] ?? null;
+  const sharedFamilies = families.slice(1);
 
   return (
     <div className="min-h-screen bg-neutral-50 p-6">
@@ -236,9 +241,20 @@ export default async function ItemPage({ params }: PageProps) {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <span className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700">
-                    Family: {family || 'Unknown'}
-                  </span>
+                  {primaryFamily ? (
+                    <span className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700">
+                      Primary Family: {primaryFamily}
+                    </span>
+                  ) : (
+                    <span className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700">
+                      Primary Family: Unknown
+                    </span>
+                  )}
+                  {sharedFamilies.length ? (
+                    <span className="inline-flex rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-700">
+                      Shared Families: {sharedFamilies.join(', ')}
+                    </span>
+                  ) : null}
                   <span
                     className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getCategoryStyles(
                       currentItem.category
