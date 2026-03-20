@@ -199,18 +199,20 @@ export default function ItemsPage() {
   });
 
   return (
-    <div className="min-h-screen bg-neutral-50 p-6">
+    <div className="min-h-screen bg-neutral-50 px-4 py-5 sm:p-6">
       <div className="mx-auto max-w-7xl">
-        <h1 className="mb-2 text-3xl font-semibold">SKU List</h1>
+        <h1 className="mb-2 text-4xl font-semibold tracking-tight text-neutral-950 sm:text-3xl">
+          SKU List
+        </h1>
         <p
-          className="mb-6 text-sm text-neutral-600"
+          className="mb-5 max-w-2xl text-base leading-8 text-neutral-700 sm:mb-6 sm:text-sm sm:leading-6"
           suppressHydrationWarning
         >
           Filter by name or SKU, then narrow the list by family and category.
         </p>
 
         <div
-          className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_220px]"
+          className="mb-5 grid gap-3 md:mb-4 md:grid-cols-[minmax(0,1fr)_220px_220px]"
           suppressHydrationWarning
         >
           <input
@@ -222,7 +224,7 @@ export default function ItemsPage() {
               setSearch(value);
               void fetchItems(value, family, category);
             }}
-            className="rounded-xl border border-neutral-300 bg-white p-3"
+            className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm placeholder:text-neutral-400 sm:rounded-xl sm:p-3 sm:text-sm"
           />
 
           <select
@@ -232,7 +234,7 @@ export default function ItemsPage() {
               setFamily(value);
               void fetchItems(search, value, category);
             }}
-            className="rounded-xl border border-neutral-300 bg-white p-3"
+            className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm sm:rounded-xl sm:p-3 sm:text-sm"
             suppressHydrationWarning
           >
             <option value="">All Families</option>
@@ -250,7 +252,7 @@ export default function ItemsPage() {
               setCategory(value);
               void fetchItems(search, family, value);
             }}
-            className="rounded-xl border border-neutral-300 bg-white p-3"
+            className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm sm:rounded-xl sm:p-3 sm:text-sm"
             suppressHydrationWarning
           >
             <option value="">All Categories</option>
@@ -262,7 +264,68 @@ export default function ItemsPage() {
           </select>
         </div>
 
-        <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
+        <div className="space-y-4 md:hidden">
+          {sortedItems.map((item) => (
+            <Link
+              key={item.id}
+              href={`/items/${item.id}`}
+              className="block rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:border-neutral-300"
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-600">
+                    {item.family || 'Unassigned Family'}
+                  </div>
+                  <div className="mt-2 break-words text-lg font-semibold leading-7 text-neutral-950">
+                    {item.item_name}
+                  </div>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${
+                    item.category
+                      ? categoryStyles[item.category] || 'bg-neutral-100 text-neutral-700 border-neutral-200'
+                      : 'bg-neutral-100 text-neutral-700 border-neutral-200'
+                  }`}
+                >
+                  {formatCategory(item.category)}
+                </span>
+              </div>
+
+              <div className="mb-4 break-words text-sm font-medium text-neutral-800">
+                {item.sku}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 rounded-2xl bg-neutral-50 p-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                    Total Qty
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-neutral-950">
+                    {formatQuantity(item.totalQty, item.default_unit)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                    Last Inward
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-neutral-950">
+                    {item.lastInward ? formatInwardDate(item.lastInward) : '—'}
+                  </div>
+                  <div className="mt-0.5 text-xs text-neutral-600">
+                    {item.lastInwardQty !== null
+                      ? formatQuantity(
+                          item.lastInwardQty,
+                          item.lastInwardUnit || item.default_unit
+                        )
+                      : '—'}
+                  </div>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        <div className="hidden overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm md:block">
           <table className="min-w-full text-sm">
             <thead className="bg-neutral-100 text-left">
               <tr>
