@@ -24,6 +24,10 @@ type ItemQuantityProfile = {
   totalKgs: number;
 };
 
+type ItemFamilyRecord = {
+  code: string;
+};
+
 function normalizedComparisonKey(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
@@ -54,6 +58,37 @@ function toItemDefaultUnit(unit: string | null): string {
   }
 
   return 'pcs';
+}
+
+function resolveItemFamilyCode(
+  itemName: string,
+  validFamilyCodes: Set<string>,
+  sku?: string | null
+): string | null {
+  const candidateCodes = new Set<string>();
+  const derivedFamily = deriveItemFamily(itemName, sku)?.trim().toUpperCase();
+
+  if (derivedFamily) {
+    candidateCodes.add(derivedFamily);
+
+    const prefixedMatch = derivedFamily.match(/^([A-Z]{1,3})-\d{2,4}$/);
+    if (prefixedMatch) {
+      candidateCodes.add(prefixedMatch[1]);
+    }
+  }
+
+  const itemNamePrefixMatch = itemName.trim().toUpperCase().match(/^([A-Z]{1,3})-\d{2,4}\b/);
+  if (itemNamePrefixMatch) {
+    candidateCodes.add(itemNamePrefixMatch[1]);
+  }
+
+  for (const candidateCode of candidateCodes) {
+    if (validFamilyCodes.has(candidateCode)) {
+      return candidateCode;
+    }
+  }
+
+  return null;
 }
 
 function getRawPayloadNumber(
@@ -190,9 +225,25 @@ async function fetchItems(normalizedItemNames: string[]) {
   return items;
 }
 
+async function fetchItemFamilyCodes() {
+  const supabase = getSupabaseServerClient();
+  const { data, error } = await supabase
+    .from('item_families')
+    .select('code');
+
+  if (error) {
+    throw new Error(`Item family lookup failed: ${error.message}`);
+  }
+
+  return new Set(
+    ((data ?? []) as ItemFamilyRecord[]).map((record) => record.code.trim().toUpperCase())
+  );
+}
+
 async function insertMissingItems(
   normalizedItemNames: string[],
-  defaultUnitByNormalizedName: Map<string, string>
+  defaultUnitByNormalizedName: Map<string, string>,
+  validFamilyCodes: Set<string>
 ) {
   if (!normalizedItemNames.length) {
     return [] as ItemRecord[];
@@ -203,7 +254,7 @@ async function insertMissingItems(
     sku: createTemporarySku(normalizedItemName),
     item_name: normalizedItemName,
     normalized_name: normalizedItemName,
-    family: deriveItemFamily(normalizedItemName),
+    family: resolveItemFamilyCode(normalizedItemName, validFamilyCodes),
     category: DEFAULT_ITEM_CATEGORY,
     default_unit:
       defaultUnitByNormalizedName.get(normalizedItemName) ?? DEFAULT_ITEM_UNIT,
@@ -379,6 +430,7 @@ export async function POST(req: NextRequest) {
 
     const aliasRecords = await fetchAliases(uniqueRawItemNames);
     const itemRecords = await fetchItems(uniqueNormalizedItemNames);
+    const validFamilyCodes = await fetchItemFamilyCodes();
 
     const itemIdByRawName = new Map(
       aliasRecords.map((record) => [record.alias, record.item_id])
@@ -397,7 +449,8 @@ export async function POST(req: NextRequest) {
 
     const insertedItems = await insertMissingItems(
       missingNormalizedItemNames,
-      defaultUnitByNormalizedName
+      defaultUnitByNormalizedName,
+      validFamilyCodes
     );
     for (const item of insertedItems) {
       itemIdByNormalizedName.set(
