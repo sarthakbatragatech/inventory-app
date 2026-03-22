@@ -2,19 +2,23 @@ import { supabaseOrder } from '@/lib/supabaseOrder';
 
 const ORDER_SALES_PAGE_SIZE = 1000;
 
+type RawItem = {
+  id: string;
+  code: string | null;
+  name: string | null;
+  category: string | null;
+  company: string | null;
+};
+
+type RawOrderLine = {
+  item_id: string;
+  items: RawItem | RawItem[] | null;
+};
+
 type RawDispatchRow = {
   dispatched_at: string;
   dispatched_qty: number | null;
-  order_lines: {
-    item_id: string;
-    items: {
-      id: string;
-      code: string | null;
-      name: string | null;
-      category: string | null;
-      company: string | null;
-    } | null;
-  } | null;
+  order_lines: RawOrderLine | RawOrderLine[] | null;
 };
 
 export type OrderPortalSalesRow = {
@@ -34,6 +38,22 @@ function normalizeModelKey(code: string | null, name: string | null) {
 
   const normalizedName = name?.trim() || '';
   return normalizedName.toUpperCase();
+}
+
+function getFirstOrderLine(orderLines: RawDispatchRow['order_lines']) {
+  if (!orderLines) {
+    return null;
+  }
+
+  return Array.isArray(orderLines) ? orderLines[0] ?? null : orderLines;
+}
+
+function getFirstItem(orderLine: RawOrderLine | null) {
+  if (!orderLine?.items) {
+    return null;
+  }
+
+  return Array.isArray(orderLine.items) ? orderLine.items[0] ?? null : orderLine.items;
 }
 
 export async function listOrderPortalSales(window?: {
@@ -64,10 +84,11 @@ export async function listOrderPortalSales(window?: {
       throw new Error(`Order portal sales fetch failed: ${error.message}`);
     }
 
-    const rows = (data ?? []) as RawDispatchRow[];
+    const rows = (data ?? []) as unknown as RawDispatchRow[];
 
     for (const row of rows) {
-      const item = row.order_lines?.items;
+      const orderLine = getFirstOrderLine(row.order_lines);
+      const item = getFirstItem(orderLine);
       if (!item) {
         continue;
       }
@@ -97,7 +118,7 @@ export async function listOrderPortalSales(window?: {
 
       aggregated.set(aggregateKey, {
         sale_date: saleDate,
-        source_item_id: item.id ?? row.order_lines?.item_id ?? null,
+        source_item_id: item.id ?? orderLine?.item_id ?? null,
         model_key: modelKey,
         fg_name: item.name?.trim() || null,
         category: item.category,
