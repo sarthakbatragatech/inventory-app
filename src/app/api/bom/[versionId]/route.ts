@@ -19,6 +19,16 @@ function isIsoDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+function getFgSkuFromVersion(version: {
+  bom_models: { fg_sku: string } | Array<{ fg_sku: string }>;
+}) {
+  const relation = Array.isArray(version.bom_models)
+    ? version.bom_models[0]
+    : version.bom_models;
+
+  return relation?.fg_sku ?? '';
+}
+
 export async function PUT(
   request: NextRequest,
   context: RouteContext<'/api/bom/[versionId]'>
@@ -74,7 +84,11 @@ export async function PUT(
       return NextResponse.json({ error: versionError.message }, { status: 500 });
     }
 
-    const fgSku = (version.bom_models as { fg_sku: string }).fg_sku;
+    const fgSku = getFgSkuFromVersion(version);
+
+    if (!fgSku) {
+      return NextResponse.json({ error: 'BOM model lookup failed.' }, { status: 500 });
+    }
 
     const { error: updateVersionError } = await supabase
       .from('bom_versions')
