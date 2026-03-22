@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { listOrderPortalSales } from '@/lib/order-sales';
-import { supabaseInventory } from '@/lib/supabaseInventory';
+import { getSupabaseInventoryClient } from '@/lib/supabaseInventory';
 
 const DEFAULT_LOOKBACK_DAYS = 30;
 const UPSERT_CHUNK_SIZE = 500;
@@ -81,6 +81,7 @@ async function upsertImportedRows(rows: ImportedSaleRow[]) {
   }
 
   let upsertedCount = 0;
+  const supabaseInventory = getSupabaseInventoryClient();
 
   for (const chunk of chunkArray(rows, UPSERT_CHUNK_SIZE)) {
     const { error } = await supabaseInventory

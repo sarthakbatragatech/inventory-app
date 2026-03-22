@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
-import { supabaseOrder } from '@/lib/supabaseOrder';
+import { getSupabaseOrderClient } from '@/lib/supabaseOrder';
 
 const PAGE_SIZE = 1000;
 
 export async function GET() {
   try {
+    const supabaseOrder = getSupabaseOrderClient();
     const distinctSkus = new Set<string>();
     let totalRows = 0;
 

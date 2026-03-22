@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { supabaseInventory } from '@/lib/supabaseInventory';
+import { getSupabaseInventoryClient } from '@/lib/supabaseInventory';
 
 export async function GET() {
+  const supabaseInventory = getSupabaseInventoryClient();
   const { data, error } = await supabaseInventory
     .from('daily_fg_sales_import')
     .select('*')

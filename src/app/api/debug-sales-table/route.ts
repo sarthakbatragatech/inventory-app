@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { supabaseOrder } from '@/lib/supabaseOrder';
+import { getSupabaseOrderClient } from '@/lib/supabaseOrder';
 
 export async function GET() {
   try {
+    const supabaseOrder = getSupabaseOrderClient();
     const [headCount, latestRows, earliestRows] = await Promise.all([
       supabaseOrder
         .from('daily_fg_sales')

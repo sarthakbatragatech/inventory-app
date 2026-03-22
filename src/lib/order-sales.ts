@@ -1,4 +1,4 @@
-import { supabaseOrder } from '@/lib/supabaseOrder';
+import { getSupabaseOrderClient } from '@/lib/supabaseOrder';
 
 const ORDER_SALES_PAGE_SIZE = 1000;
 
@@ -61,6 +61,7 @@ export async function listOrderPortalSales(window?: {
   endDate: string;
 }) {
   const aggregated = new Map<string, OrderPortalSalesRow>();
+  const supabaseOrder = getSupabaseOrderClient();
 
   for (let from = 0; ; from += ORDER_SALES_PAGE_SIZE) {
     const to = from + ORDER_SALES_PAGE_SIZE - 1;

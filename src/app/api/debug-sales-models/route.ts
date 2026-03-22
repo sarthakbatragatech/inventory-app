@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseOrder } from '@/lib/supabaseOrder';
+import { getSupabaseOrderClient } from '@/lib/supabaseOrder';
 
 export async function GET(request: NextRequest) {
+  const supabaseOrder = getSupabaseOrderClient();
   const q = request.nextUrl.searchParams.get('q')?.trim() ?? '';
 
   if (!q) {
