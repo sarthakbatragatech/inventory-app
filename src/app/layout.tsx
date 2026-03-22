@@ -35,22 +35,34 @@ export default function RootLayout({
             <Brand compact />
             <nav className="flex items-center gap-1 text-sm sm:gap-2">
               <Link
-                href="/upload"
+                href="/"
                 className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
               >
-                Upload
+                Home
+              </Link>
+              <Link
+                href="/bom"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
+              >
+                BOM
+              </Link>
+              <Link
+                href="/stock"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
+              >
+                Stock
+              </Link>
+              <Link
+                href="/model-analysis"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
+              >
+                Model Analysis
               </Link>
               <Link
                 href="/items"
                 className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
               >
-                Items
-              </Link>
-              <Link
-                href="/imports"
-                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
-              >
-                Imports
+                Inward
               </Link>
             </nav>
           </div>

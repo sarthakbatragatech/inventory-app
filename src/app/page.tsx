@@ -12,7 +12,7 @@ export default function HomePage() {
             visibility for the Tycoon workflow.
           </p>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <Link href="/upload" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
               <div className="text-lg font-medium text-neutral-950">Upload inward Excel</div>
               <div className="mt-2 text-sm text-neutral-700">
@@ -21,9 +21,9 @@ export default function HomePage() {
             </Link>
 
             <Link href="/items" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
-              <div className="text-lg font-medium text-neutral-950">Browse SKUs</div>
+              <div className="text-lg font-medium text-neutral-950">Inward</div>
               <div className="mt-2 text-sm text-neutral-700">
-                Search by SKU, item name, and aliases.
+                Review inwarded SKUs, quantities, and latest receipts.
               </div>
             </Link>
 
@@ -31,6 +31,27 @@ export default function HomePage() {
               <div className="text-lg font-medium text-neutral-950">Import history</div>
               <div className="mt-2 text-sm text-neutral-700">
                 See all uploaded Excel batches.
+              </div>
+            </Link>
+
+            <Link href="/bom" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
+              <div className="text-lg font-medium text-neutral-950">Manage BOMs</div>
+              <div className="mt-2 text-sm text-neutral-700">
+                Map finished-good models to the component SKUs they consume.
+              </div>
+            </Link>
+
+            <Link href="/stock" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
+              <div className="text-lg font-medium text-neutral-950">Stock</div>
+              <div className="mt-2 text-sm text-neutral-700">
+                Review inventory-wide inward, sales consumption, and current balance.
+              </div>
+            </Link>
+
+            <Link href="/model-analysis" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
+              <div className="text-lg font-medium text-neutral-950">Model analysis</div>
+              <div className="mt-2 text-sm text-neutral-700">
+                Drill into a single model&apos;s BOM-based component usage.
               </div>
             </Link>
           </div>

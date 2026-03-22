@@ -1,10 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
-interface Item {
+interface StockItem {
   id: string;
   sku: string;
   item_name: string;
@@ -13,14 +12,17 @@ interface Item {
   families: string[];
   default_unit: string | null;
   created_at: string;
-  totalQty: number;
+  inwardQty: number;
+  consumedQty: number;
+  reorderThresholdQty: number;
+  balanceQty: number;
   lastInward: string | null;
   lastInwardQty: number | null;
   lastInwardUnit: string | null;
 }
 
-type ItemsResponse = {
-  items: Item[];
+type StockResponse = {
+  items: StockItem[];
   familyOptions: string[];
   categoryOptions: string[];
 };
@@ -30,7 +32,10 @@ type SortKey =
   | 'item_name'
   | 'family'
   | 'category'
-  | 'totalQty'
+  | 'inwardQty'
+  | 'consumedQty'
+  | 'reorderThresholdQty'
+  | 'balanceQty'
   | 'lastInward';
 
 type SortDirection = 'asc' | 'desc';
@@ -95,11 +100,7 @@ function renderFamilySummary(family: string | null, families: string[]): ReactNo
   return family || '—';
 }
 
-async function requestItems(
-  q = '',
-  selectedFamily = '',
-  selectedCategory = ''
-) {
+async function requestStock(q = '', selectedFamily = '', selectedCategory = '') {
   const params = new URLSearchParams();
   if (q.trim()) {
     params.set('q', q.trim());
@@ -111,26 +112,26 @@ async function requestItems(
     params.set('category', selectedCategory);
   }
 
-  const url = params.size ? `/api/items?${params.toString()}` : '/api/items';
+  const url = params.size ? `/api/stock?${params.toString()}` : '/api/stock';
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`Failed to fetch items: ${res.status} ${res.statusText}`);
+    throw new Error(`Failed to fetch stock: ${res.status} ${res.statusText}`);
   }
 
-  return (await res.json()) as ItemsResponse;
+  return (await res.json()) as StockResponse;
 }
 
-export default function ItemsPage() {
-  const [items, setItems] = useState<Item[]>([]);
+export default function StockPage() {
+  const [items, setItems] = useState<StockItem[]>([]);
   const [familyOptions, setFamilyOptions] = useState<string[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [family, setFamily] = useState('');
   const [category, setCategory] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('item_name');
+  const [sortKey, setSortKey] = useState<SortKey>('balanceQty');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
-  function applyItemsResponse(data: ItemsResponse) {
+  function applyStockResponse(data: StockResponse) {
     setItems(Array.isArray(data.items) ? data.items : []);
     setFamilyOptions(Array.isArray(data.familyOptions) ? data.familyOptions : []);
     setCategoryOptions(
@@ -138,16 +139,12 @@ export default function ItemsPage() {
     );
   }
 
-  async function fetchItems(
-    q = '',
-    selectedFamily = '',
-    selectedCategory = ''
-  ) {
+  async function fetchStock(q = '', selectedFamily = '', selectedCategory = '') {
     try {
-      const data = await requestItems(q, selectedFamily, selectedCategory);
-      applyItemsResponse(data);
+      const data = await requestStock(q, selectedFamily, selectedCategory);
+      applyStockResponse(data);
     } catch (error) {
-      console.error('Error fetching items:', error);
+      console.error('Error fetching stock:', error);
       setItems([]);
     }
   }
@@ -155,21 +152,21 @@ export default function ItemsPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadInitialItems() {
+    async function loadInitialStock() {
       try {
-        const data = await requestItems();
+        const data = await requestStock();
         if (!cancelled) {
-          applyItemsResponse(data);
+          applyStockResponse(data);
         }
       } catch (error) {
-        console.error('Error fetching items:', error);
+        console.error('Error fetching stock:', error);
         if (!cancelled) {
           setItems([]);
         }
       }
     }
 
-    void loadInitialItems();
+    void loadInitialStock();
 
     return () => {
       cancelled = true;
@@ -183,7 +180,15 @@ export default function ItemsPage() {
     }
 
     setSortKey(nextKey);
-    setSortDirection(nextKey === 'lastInward' || nextKey === 'totalQty' ? 'desc' : 'asc');
+    setSortDirection(
+      nextKey === 'lastInward' ||
+        nextKey === 'inwardQty' ||
+        nextKey === 'consumedQty' ||
+        nextKey === 'reorderThresholdQty' ||
+        nextKey === 'balanceQty'
+        ? 'desc'
+        : 'asc'
+    );
   }
 
   function sortIndicator(key: SortKey) {
@@ -210,8 +215,17 @@ export default function ItemsPage() {
       case 'category':
         result = compareText(left.category, right.category);
         break;
-      case 'totalQty':
-        result = left.totalQty - right.totalQty;
+      case 'inwardQty':
+        result = left.inwardQty - right.inwardQty;
+        break;
+      case 'consumedQty':
+        result = left.consumedQty - right.consumedQty;
+        break;
+      case 'reorderThresholdQty':
+        result = left.reorderThresholdQty - right.reorderThresholdQty;
+        break;
+      case 'balanceQty':
+        result = left.balanceQty - right.balanceQty;
         break;
       case 'lastInward':
         result =
@@ -227,13 +241,14 @@ export default function ItemsPage() {
     <div className="min-h-screen bg-neutral-50 px-4 py-5 sm:p-6">
       <div className="mx-auto max-w-7xl">
         <h1 className="mb-2 text-4xl font-semibold tracking-tight text-neutral-950 sm:text-3xl">
-          Inward
+          Stock
         </h1>
         <p
-          className="mb-5 max-w-2xl text-base leading-8 text-neutral-700 sm:mb-6 sm:text-sm sm:leading-6"
+          className="mb-5 max-w-3xl text-base leading-8 text-neutral-700 sm:mb-6 sm:text-sm sm:leading-6"
           suppressHydrationWarning
         >
-          Filter inwarded SKUs by name, family, and category to review current receipts.
+          Review inventory-wide inward, BOM-driven consumption, reorder threshold,
+          and current balance. Production is not included yet.
         </p>
 
         <div
@@ -247,7 +262,7 @@ export default function ItemsPage() {
             onChange={(e) => {
               const value = e.target.value;
               setSearch(value);
-              void fetchItems(value, family, category);
+              void fetchStock(value, family, category);
             }}
             className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm placeholder:text-neutral-400 sm:rounded-xl sm:p-3 sm:text-sm"
           />
@@ -257,7 +272,7 @@ export default function ItemsPage() {
             onChange={(e) => {
               const value = e.target.value;
               setFamily(value);
-              void fetchItems(search, value, category);
+              void fetchStock(search, value, category);
             }}
             className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm sm:rounded-xl sm:p-3 sm:text-sm"
             suppressHydrationWarning
@@ -275,7 +290,7 @@ export default function ItemsPage() {
             onChange={(e) => {
               const value = e.target.value;
               setCategory(value);
-              void fetchItems(search, family, value);
+              void fetchStock(search, family, value);
             }}
             className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm sm:rounded-xl sm:p-3 sm:text-sm"
             suppressHydrationWarning
@@ -291,10 +306,9 @@ export default function ItemsPage() {
 
         <div className="space-y-4 md:hidden">
           {sortedItems.map((item) => (
-            <Link
+            <div
               key={item.id}
-              href={`/items/${item.id}`}
-              className="block rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:shadow-md"
+              className="rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm"
             >
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -308,38 +322,66 @@ export default function ItemsPage() {
                 <span
                   className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${
                     item.category
-                      ? categoryStyles[item.category] || 'bg-neutral-100 text-neutral-700 border-neutral-200'
-                      : 'bg-neutral-100 text-neutral-700 border-neutral-200'
+                      ? categoryStyles[item.category] ||
+                        'border-neutral-200 bg-neutral-100 text-neutral-700'
+                      : 'border-neutral-200 bg-neutral-100 text-neutral-700'
                   }`}
                 >
                   {formatCategory(item.category)}
                 </span>
               </div>
 
-              <div className="mb-2 break-words text-sm font-semibold text-sky-700 underline decoration-sky-300 underline-offset-4">
+              <div className="mb-4 break-words text-sm font-semibold text-sky-700">
                 {item.sku}
-              </div>
-              <div className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-sky-600">
-                Tap to view details
               </div>
 
               <div className="grid grid-cols-2 gap-3 rounded-2xl bg-neutral-50 p-3">
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
-                    Total Qty
+                    Inward
                   </div>
                   <div className="mt-1 text-sm font-semibold text-neutral-950">
-                    {formatQuantity(item.totalQty, item.default_unit)}
+                    {formatQuantity(item.inwardQty, item.default_unit)}
                   </div>
                 </div>
                 <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                    Consumed
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-neutral-950">
+                    {formatQuantity(item.consumedQty, item.default_unit)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                    Threshold
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-neutral-950">
+                    {formatQuantity(item.reorderThresholdQty, item.default_unit)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                    Balance
+                  </div>
+                  <div
+                    className={`mt-1 text-sm font-semibold ${
+                      item.balanceQty < item.reorderThresholdQty
+                        ? 'text-rose-700'
+                        : 'text-emerald-700'
+                    }`}
+                  >
+                    {formatQuantity(item.balanceQty, item.default_unit)}
+                  </div>
+                </div>
+                <div className="col-span-2">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
                     Last Inward
                   </div>
                   <div className="mt-1 text-sm font-semibold text-neutral-950">
                     {item.lastInward ? formatInwardDate(item.lastInward) : '—'}
                   </div>
-                  <div className="mt-0.5 text-xs text-neutral-600">
+                  <div className="text-xs text-neutral-600">
                     {item.lastInwardQty !== null
                       ? formatQuantity(
                           item.lastInwardQty,
@@ -349,7 +391,7 @@ export default function ItemsPage() {
                   </div>
                 </div>
               </div>
-            </Link>
+            </div>
           ))}
         </div>
 
@@ -378,8 +420,23 @@ export default function ItemsPage() {
                   </button>
                 </th>
                 <th className="px-4 py-3">
-                  <button type="button" onClick={() => toggleSort('totalQty')} className="font-semibold">
-                    Total Qty {sortIndicator('totalQty')}
+                  <button type="button" onClick={() => toggleSort('inwardQty')} className="font-semibold">
+                    Inward {sortIndicator('inwardQty')}
+                  </button>
+                </th>
+                <th className="px-4 py-3">
+                  <button type="button" onClick={() => toggleSort('consumedQty')} className="font-semibold">
+                    Consumed {sortIndicator('consumedQty')}
+                  </button>
+                </th>
+                <th className="px-4 py-3">
+                  <button type="button" onClick={() => toggleSort('reorderThresholdQty')} className="font-semibold">
+                    Threshold {sortIndicator('reorderThresholdQty')}
+                  </button>
+                </th>
+                <th className="px-4 py-3">
+                  <button type="button" onClick={() => toggleSort('balanceQty')} className="font-semibold">
+                    Balance {sortIndicator('balanceQty')}
                   </button>
                 </th>
                 <th className="px-4 py-3">
@@ -392,30 +449,42 @@ export default function ItemsPage() {
 
             <tbody>
               {sortedItems.map((item) => (
-                <tr key={item.id} className="border-t border-neutral-200 transition hover:bg-sky-50/70">
-                  <td className="px-4 py-3 font-medium text-neutral-700">
-                    <Link
-                      href={`/items/${item.id}`}
-                      className="font-semibold text-sky-700 underline decoration-sky-300 underline-offset-4 transition hover:text-sky-800 hover:decoration-sky-600"
-                    >
-                      {item.sku}
-                    </Link>
-                  </td>
+                <tr
+                  key={item.id}
+                  className="border-t border-neutral-200 transition hover:bg-sky-50/70"
+                >
+                  <td className="px-4 py-3 font-medium text-neutral-700">{item.sku}</td>
                   <td className="px-4 py-3">{item.item_name}</td>
                   <td className="px-4 py-3">{renderFamilySummary(item.family, item.families)}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
                         item.category
-                          ? categoryStyles[item.category] || 'bg-neutral-100 text-neutral-700 border-neutral-200'
-                          : 'bg-neutral-100 text-neutral-700 border-neutral-200'
+                          ? categoryStyles[item.category] ||
+                            'border-neutral-200 bg-neutral-100 text-neutral-700'
+                          : 'border-neutral-200 bg-neutral-100 text-neutral-700'
                       }`}
                     >
                       {formatCategory(item.category)}
                     </span>
                   </td>
                   <td className="px-4 py-3 font-semibold">
-                    {formatQuantity(item.totalQty, item.default_unit)}
+                    {formatQuantity(item.inwardQty, item.default_unit)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {formatQuantity(item.consumedQty, item.default_unit)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {formatQuantity(item.reorderThresholdQty, item.default_unit)}
+                  </td>
+                  <td
+                    className={`px-4 py-3 font-semibold ${
+                      item.balanceQty < item.reorderThresholdQty
+                        ? 'text-rose-700'
+                        : 'text-emerald-700'
+                    }`}
+                  >
+                    {formatQuantity(item.balanceQty, item.default_unit)}
                   </td>
                   <td className="px-4 py-3">
                     {item.lastInward ? (
