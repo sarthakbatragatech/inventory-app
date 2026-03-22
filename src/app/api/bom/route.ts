@@ -108,11 +108,17 @@ export async function POST(request: NextRequest) {
 
       modelId = insertedModel.id;
     } else {
+      const currentModel = existingModel;
+
+      if (!currentModel) {
+        return NextResponse.json({ error: 'BOM model lookup failed.' }, { status: 500 });
+      }
+
       const { error: updateModelError } = await supabase
         .from('bom_models')
         .update({
-          fg_name: body.fgName?.trim() || existingModel.fg_name || null,
-          source_item_id: localSourceItemId || existingModel.source_item_id || null,
+          fg_name: body.fgName?.trim() || currentModel.fg_name || null,
+          source_item_id: localSourceItemId || currentModel.source_item_id || null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', modelId);
