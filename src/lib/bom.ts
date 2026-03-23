@@ -154,10 +154,16 @@ export async function listComponentItems() {
 
 export async function listBomCatalogItems() {
   const deduped = new Map<string, BomCatalogItem>();
-  const orderPortalCatalog = await listOrderPortalSalesCatalog();
+  try {
+    const orderPortalCatalog = await listOrderPortalSalesCatalog();
 
-  for (const row of orderPortalCatalog) {
-    deduped.set(row.fg_sku, row);
+    for (const row of orderPortalCatalog) {
+      deduped.set(row.fg_sku, row);
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unknown order portal catalog error';
+    console.error('Failed to load order portal sales catalog for BOMs:', message);
   }
 
   const inventorySupabase = getSupabaseInventoryServerClient();
