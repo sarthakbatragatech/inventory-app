@@ -27,6 +27,15 @@ type StockResponse = {
   categoryOptions: string[];
 };
 
+type SyncSalesResponse = {
+  mode?: 'window' | 'all';
+  startDate?: string | null;
+  endDate?: string | null;
+  fetched?: number;
+  upserted?: number;
+  error?: string;
+};
+
 type SortKey =
   | 'sku'
   | 'item_name'
@@ -121,6 +130,19 @@ async function requestStock(q = '', selectedFamily = '', selectedCategory = '') 
   return (await res.json()) as StockResponse;
 }
 
+async function requestSalesSync() {
+  const res = await fetch('/api/sync-sales', {
+    method: 'POST',
+  });
+  const data = (await res.json()) as SyncSalesResponse;
+
+  if (!res.ok) {
+    throw new Error(data.error || `Failed to sync sales: ${res.status} ${res.statusText}`);
+  }
+
+  return data;
+}
+
 export default function StockPage() {
   const [items, setItems] = useState<StockItem[]>([]);
   const [familyOptions, setFamilyOptions] = useState<string[]>([]);
@@ -130,6 +152,10 @@ export default function StockPage() {
   const [category, setCategory] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('balanceQty');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [syncMessage, setSyncMessage] = useState('');
 
   function applyStockResponse(data: StockResponse) {
     setItems(Array.isArray(data.items) ? data.items : []);
@@ -140,12 +166,41 @@ export default function StockPage() {
   }
 
   async function fetchStock(q = '', selectedFamily = '', selectedCategory = '') {
+    setIsLoading(true);
     try {
       const data = await requestStock(q, selectedFamily, selectedCategory);
       applyStockResponse(data);
+      setErrorMessage('');
     } catch (error) {
       console.error('Error fetching stock:', error);
       setItems([]);
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load stock.');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function syncSalesAndRefresh() {
+    setIsSyncing(true);
+    setSyncMessage('');
+    setErrorMessage('');
+
+    try {
+      const result = await requestSalesSync();
+      await fetchStock(search, family, category);
+
+      const windowLabel =
+        result.startDate && result.endDate
+          ? `${result.startDate} to ${result.endDate}`
+          : 'all available dates';
+      setSyncMessage(
+        `Sales synced for ${windowLabel}. Imported ${result.upserted ?? 0} rows.`
+      );
+    } catch (error) {
+      console.error('Error syncing sales:', error);
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to sync sales.');
+    } finally {
+      setIsSyncing(false);
     }
   }
 
@@ -157,15 +212,24 @@ export default function StockPage() {
         const data = await requestStock();
         if (!cancelled) {
           applyStockResponse(data);
+          setErrorMessage('');
         }
       } catch (error) {
         console.error('Error fetching stock:', error);
         if (!cancelled) {
           setItems([]);
+          setErrorMessage(
+            error instanceof Error ? error.message : 'Failed to load stock.'
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
         }
       }
     }
 
+    setIsLoading(true);
     void loadInitialStock();
 
     return () => {
@@ -250,6 +314,32 @@ export default function StockPage() {
           Review inventory-wide inward, BOM-driven consumption, reorder threshold,
           and current balance. Production is not included yet.
         </p>
+
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-neutral-600">
+            Stock updates after sales are synced from the order portal.
+          </div>
+          <button
+            type="button"
+            onClick={() => void syncSalesAndRefresh()}
+            disabled={isSyncing || isLoading}
+            className="rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+          >
+            {isSyncing ? 'Syncing sales...' : 'Sync Sales'}
+          </button>
+        </div>
+
+        {syncMessage ? (
+          <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {syncMessage}
+          </div>
+        ) : null}
+
+        {errorMessage ? (
+          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {errorMessage}
+          </div>
+        ) : null}
 
         <div
           className="mb-5 grid gap-3 md:mb-4 md:grid-cols-[minmax(0,1fr)_220px_220px]"
