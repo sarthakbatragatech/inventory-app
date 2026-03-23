@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
@@ -291,7 +290,7 @@ export default function ItemsPage() {
 
         <div className="space-y-4 md:hidden">
           {sortedItems.map((item) => (
-            <Link
+            <a
               key={item.id}
               href={`/items/${item.id}`}
               className="block rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:shadow-md"
@@ -349,7 +348,7 @@ export default function ItemsPage() {
                   </div>
                 </div>
               </div>
-            </Link>
+            </a>
           ))}
         </div>
 
@@ -394,12 +393,12 @@ export default function ItemsPage() {
               {sortedItems.map((item) => (
                 <tr key={item.id} className="border-t border-neutral-200 transition hover:bg-sky-50/70">
                   <td className="px-4 py-3 font-medium text-neutral-700">
-                    <Link
+                    <a
                       href={`/items/${item.id}`}
                       className="font-semibold text-sky-700 underline decoration-sky-300 underline-offset-4 transition hover:text-sky-800 hover:decoration-sky-600"
                     >
                       {item.sku}
-                    </Link>
+                    </a>
                   </td>
                   <td className="px-4 py-3">{item.item_name}</td>
                   <td className="px-4 py-3">{renderFamilySummary(item.family, item.families)}</td>

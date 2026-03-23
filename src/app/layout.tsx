@@ -1,7 +1,7 @@
-import Link from 'next/link';
 import type { Metadata } from "next";
 import { Brand } from '@/components/brand';
 import { Geist, Geist_Mono } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -36,33 +36,33 @@ export default function RootLayout({
             <nav className="flex items-center gap-1 text-sm sm:gap-2">
               <Link
                 href="/"
-                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-sky-100 hover:text-sky-950"
               >
                 Home
               </Link>
               <Link
                 href="/bom"
-                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-amber-100 hover:text-amber-950"
               >
                 BOM
               </Link>
               <Link
                 href="/stock"
-                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-emerald-100 hover:text-emerald-950"
               >
                 Stock
               </Link>
               <Link
                 href="/model-analysis"
-                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-rose-100 hover:text-rose-950"
               >
                 Model Analysis
               </Link>
               <Link
                 href="/items"
-                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-100 hover:text-neutral-950"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-violet-100 hover:text-violet-950"
               >
-                Inward
+                Inward Data
               </Link>
             </nav>
           </div>

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { UploadResponse } from '@/types/inventory';
 
@@ -137,8 +138,63 @@ export default function UploadPage() {
                 <div className="text-xs uppercase tracking-wide text-neutral-500">Aliases Created</div>
                 <div className="mt-1 text-2xl font-semibold">{result.aliasesCreated ?? 0}</div>
               </div>
+              <div className="rounded-xl bg-white p-3">
+                <div className="text-xs uppercase tracking-wide text-neutral-500">Rows Replaced</div>
+                <div className="mt-1 text-2xl font-semibold">{result.overwrittenRows ?? 0}</div>
+              </div>
+              <div className="rounded-xl bg-white p-3">
+                <div className="text-xs uppercase tracking-wide text-neutral-500">Dates Replaced</div>
+                <div className="mt-1 text-2xl font-semibold">{result.overwrittenDates ?? 0}</div>
+              </div>
             </div>
             <div className="mt-3 text-xs text-neutral-500">Batch ID: {result.batchId}</div>
+            {(result.overwrittenRows ?? 0) > 0 ? (
+              <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sky-900">
+                Existing inward data for overlapping dates was replaced with this upload,
+                so accountant corrections and previously missing rows are now reflected.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {result?.success && (result.newItemsCreated ?? 0) > 0 ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm">
+            <div className="font-medium text-amber-950">New SKU follow-up required</div>
+            <p className="mt-2 text-amber-900">
+              This inward file created {result.newItemsCreated} new SKU
+              {result.newItemsCreated === 1 ? '' : 's'}. Review these items so the
+              right BOMs can be updated and each item can be tagged to the correct
+              family.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href="/bom"
+                className="rounded-xl bg-amber-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-800"
+              >
+                Review BOMs
+              </Link>
+              <Link
+                href="/items"
+                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-950 transition hover:bg-amber-100"
+              >
+                Review Items
+              </Link>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {(result.newItems ?? []).map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-xl border border-amber-200 bg-white px-3 py-3"
+                >
+                  <div className="font-medium text-neutral-950">{item.sku}</div>
+                  <div className="mt-1 text-neutral-700">{item.itemName}</div>
+                  <div className="mt-1 text-xs text-neutral-500">
+                    Family: {item.family || 'Needs family tagging'}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
       </div>

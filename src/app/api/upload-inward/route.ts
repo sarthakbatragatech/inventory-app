@@ -16,6 +16,8 @@ type AliasRecord = {
 
 type ItemRecord = {
   id: string;
+  sku?: string;
+  item_name?: string;
   normalized_name: string;
   family?: string | null;
 };
@@ -27,6 +29,10 @@ type ItemQuantityProfile = {
 
 type ItemFamilyRecord = {
   code: string;
+};
+
+type BatchRowRecord = {
+  batch_id: string;
 };
 
 function normalizedComparisonKey(value: string): string {
@@ -267,7 +273,7 @@ async function insertMissingItems(
     const { data, error } = await supabase
       .from('items')
       .insert(chunk)
-      .select('id, normalized_name, family');
+      .select('id, sku, item_name, normalized_name, family');
 
     if (error) {
       throw new Error(`Item insert failed: ${error.message}`);
@@ -377,10 +383,128 @@ async function insertImportRows(
   return payload.length;
 }
 
+async function findProcessedBatchesWithOverlappingDates(inwardDates: string[]) {
+  if (!inwardDates.length) {
+    return [] as string[];
+  }
+
+  const supabase = getSupabaseServerClient();
+  const overlappingBatchIds = new Set<string>();
+
+  for (const dateChunk of chunkArray(inwardDates, QUERY_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from('import_batch_rows')
+      .select('batch_id')
+      .in('inward_date', dateChunk);
+
+    if (error) {
+      throw new Error(`Overlapping inward-date lookup failed: ${error.message}`);
+    }
+
+    for (const row of (data ?? []) as BatchRowRecord[]) {
+      overlappingBatchIds.add(row.batch_id);
+    }
+  }
+
+  if (!overlappingBatchIds.size) {
+    return [];
+  }
+
+  const processedBatchIds = new Set<string>();
+
+  for (const batchChunk of chunkArray([...overlappingBatchIds], QUERY_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from('import_batches')
+      .select('id')
+      .eq('status', 'processed')
+      .in('id', batchChunk);
+
+    if (error) {
+      throw new Error(`Processed batch lookup failed: ${error.message}`);
+    }
+
+    for (const row of (data ?? []) as Array<{ id: string }>) {
+      processedBatchIds.add(row.id);
+    }
+  }
+
+  return [...processedBatchIds];
+}
+
+async function deleteOverlappingProcessedRows(
+  batchIds: string[],
+  inwardDates: string[]
+) {
+  if (!batchIds.length || !inwardDates.length) {
+    return 0;
+  }
+
+  const supabase = getSupabaseServerClient();
+  let deletedRowCount = 0;
+
+  for (const batchChunk of chunkArray(batchIds, QUERY_CHUNK_SIZE)) {
+    for (const dateChunk of chunkArray(inwardDates, QUERY_CHUNK_SIZE)) {
+      const { data, error } = await supabase
+        .from('import_batch_rows')
+        .delete()
+        .in('batch_id', batchChunk)
+        .in('inward_date', dateChunk)
+        .select('batch_id');
+
+      if (error) {
+        throw new Error(`Overlapping inward row cleanup failed: ${error.message}`);
+      }
+
+      deletedRowCount += (data ?? []).length;
+    }
+  }
+
+  return deletedRowCount;
+}
+
+async function deleteNowEmptyProcessedBatches(batchIds: string[]) {
+  if (!batchIds.length) {
+    return;
+  }
+
+  const supabase = getSupabaseServerClient();
+  const batchIdsWithRows = new Set<string>();
+
+  for (const batchChunk of chunkArray(batchIds, QUERY_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from('import_batch_rows')
+      .select('batch_id')
+      .in('batch_id', batchChunk);
+
+    if (error) {
+      throw new Error(`Residual batch row lookup failed: ${error.message}`);
+    }
+
+    for (const row of (data ?? []) as BatchRowRecord[]) {
+      batchIdsWithRows.add(row.batch_id);
+    }
+  }
+
+  const emptyBatchIds = batchIds.filter((batchId) => !batchIdsWithRows.has(batchId));
+  if (!emptyBatchIds.length) {
+    return;
+  }
+
+  for (const batchChunk of chunkArray(emptyBatchIds, QUERY_CHUNK_SIZE)) {
+    const { error } = await supabase
+      .from('import_batches')
+      .delete()
+      .in('id', batchChunk);
+
+    if (error) {
+      throw new Error(`Empty batch cleanup failed: ${error.message}`);
+    }
+  }
+}
+
 export async function POST(req: NextRequest) {
   const supabase = getSupabaseServerClient();
   let batchId: string | null = null;
-  let priorProcessedBatchIds: string[] = [];
 
   try {
     const formData = await req.formData();
@@ -410,22 +534,6 @@ export async function POST(req: NextRequest) {
     const parsedRows = normalizeParsedRowQuantities(
       parseInwardWorkbook(Buffer.from(bytes))
     );
-
-    const { data: existingProcessedBatches, error: existingProcessedBatchesError } =
-      await supabase
-        .from('import_batches')
-        .select('id')
-        .eq('file_name', fileEntry.name)
-        .eq('status', 'processed');
-
-    if (existingProcessedBatchesError) {
-      return NextResponse.json(
-        { error: `Batch lookup failed: ${existingProcessedBatchesError.message}` },
-        { status: 500 }
-      );
-    }
-
-    priorProcessedBatchIds = (existingProcessedBatches ?? []).map((batch) => batch.id);
 
     const { data: batch, error: batchError } = await supabase
       .from('import_batches')
@@ -527,6 +635,17 @@ export async function POST(req: NextRequest) {
       itemIdByNormalizedName
     );
 
+    const incomingInwardDates = [
+      ...new Set(parsedRows.map((row) => row.inwardDate).filter((value): value is string => Boolean(value))),
+    ];
+    const overlappingProcessedBatchIds = (
+      await findProcessedBatchesWithOverlappingDates(incomingInwardDates)
+    ).filter((existingBatchId) => existingBatchId !== currentBatchId);
+    const overwrittenRowCount = await deleteOverlappingProcessedRows(
+      overlappingProcessedBatchIds,
+      incomingInwardDates
+    );
+
     const { error: batchUpdateError } = await supabase
       .from('import_batches')
       .update({ status: 'processed' })
@@ -536,25 +655,7 @@ export async function POST(req: NextRequest) {
       throw new Error(`Batch update failed: ${batchUpdateError.message}`);
     }
 
-    if (priorProcessedBatchIds.length) {
-      const { error: oldRowsDeleteError } = await supabase
-        .from('import_batch_rows')
-        .delete()
-        .in('batch_id', priorProcessedBatchIds);
-
-      if (oldRowsDeleteError) {
-        throw new Error(`Old batch row cleanup failed: ${oldRowsDeleteError.message}`);
-      }
-
-      const { error: oldBatchDeleteError } = await supabase
-        .from('import_batches')
-        .delete()
-        .in('id', priorProcessedBatchIds);
-
-      if (oldBatchDeleteError) {
-        throw new Error(`Old batch cleanup failed: ${oldBatchDeleteError.message}`);
-      }
-    }
+    await deleteNowEmptyProcessedBatches(overlappingProcessedBatchIds);
 
     return NextResponse.json({
       success: true,
@@ -562,7 +663,15 @@ export async function POST(req: NextRequest) {
       rowsImported: insertedRowCount,
       uniqueItemsMatched: uniqueNormalizedItemNames.length,
       newItemsCreated: insertedItems.length,
+      newItems: insertedItems.map((item) => ({
+        id: item.id,
+        sku: item.sku ?? '',
+        itemName: item.item_name ?? item.normalized_name,
+        family: item.family ?? null,
+      })),
       aliasesCreated: aliasRows.length,
+      overwrittenRows: overwrittenRowCount,
+      overwrittenDates: incomingInwardDates.length,
     });
   } catch (error) {
     if (batchId) {

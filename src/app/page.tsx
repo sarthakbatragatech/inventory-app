@@ -1,59 +1,69 @@
-import Link from 'next/link';
 import { Brand } from '@/components/brand';
+
+const homeLinks = [
+  {
+    href: '/upload',
+    title: 'Upload inward Excel',
+    description: 'Add a new inward batch from employee-maintained Excel.',
+  },
+  {
+    href: '/items',
+    title: 'Inward Data',
+    description: 'Review inwarded SKUs, quantities, and latest receipts.',
+  },
+  {
+    href: '/imports',
+    title: 'Import history',
+    description: 'See all uploaded Excel batches.',
+  },
+  {
+    href: '/bom',
+    title: 'Manage BOMs',
+    description: 'Map finished-good models to the component SKUs they consume.',
+  },
+  {
+    href: '/stock',
+    title: 'Stock',
+    description: 'Review inventory-wide inward, sales consumption, and current balance.',
+  },
+  {
+    href: '/model-analysis',
+    title: 'Model analysis',
+    description: "Drill into a single model's BOM-based component usage.",
+  },
+] as const;
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-neutral-50 px-4 py-8 sm:p-6">
-      <div className="mx-auto max-w-5xl">
-        <div className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm sm:p-8">
+    <div className="min-h-screen bg-neutral-50 px-4 py-8 sm:px-6 sm:py-10">
+      <div className="mx-auto max-w-6xl">
+        <div className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm sm:p-8 lg:p-10">
           <Brand />
-          <p className="mt-5 max-w-2xl text-base leading-7 text-neutral-700">
+          <p className="mt-6 max-w-5xl text-base leading-8 text-neutral-700 sm:text-lg">
             SKU master, inward imports, searchable item history, and cleaner stock
             visibility for the Tycoon workflow.
           </p>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-            <Link href="/upload" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
-              <div className="text-lg font-medium text-neutral-950">Upload inward Excel</div>
-              <div className="mt-2 text-sm text-neutral-700">
-                Add a new inward batch from employee-maintained Excel.
-              </div>
-            </Link>
-
-            <Link href="/items" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
-              <div className="text-lg font-medium text-neutral-950">Inward</div>
-              <div className="mt-2 text-sm text-neutral-700">
-                Review inwarded SKUs, quantities, and latest receipts.
-              </div>
-            </Link>
-
-            <Link href="/imports" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
-              <div className="text-lg font-medium text-neutral-950">Import history</div>
-              <div className="mt-2 text-sm text-neutral-700">
-                See all uploaded Excel batches.
-              </div>
-            </Link>
-
-            <Link href="/bom" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
-              <div className="text-lg font-medium text-neutral-950">Manage BOMs</div>
-              <div className="mt-2 text-sm text-neutral-700">
-                Map finished-good models to the component SKUs they consume.
-              </div>
-            </Link>
-
-            <Link href="/stock" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
-              <div className="text-lg font-medium text-neutral-950">Stock</div>
-              <div className="mt-2 text-sm text-neutral-700">
-                Review inventory-wide inward, sales consumption, and current balance.
-              </div>
-            </Link>
-
-            <Link href="/model-analysis" className="rounded-3xl border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:border-neutral-300 hover:bg-white">
-              <div className="text-lg font-medium text-neutral-950">Model analysis</div>
-              <div className="mt-2 text-sm text-neutral-700">
-                Drill into a single model&apos;s BOM-based component usage.
-              </div>
-            </Link>
+          <div className="mt-10 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {homeLinks.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="group flex min-h-52 flex-col justify-between rounded-[1.75rem] border border-neutral-200 bg-neutral-50 p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-sky-200 hover:bg-gradient-to-br hover:from-sky-50 hover:to-amber-50 hover:shadow-md"
+              >
+                <div>
+                  <div className="text-2xl font-semibold tracking-tight text-neutral-950 transition group-hover:text-sky-950">
+                    {link.title}
+                  </div>
+                  <div className="mt-4 max-w-xs text-base leading-8 text-neutral-600 transition group-hover:text-neutral-700">
+                    {link.description}
+                  </div>
+                </div>
+                <div className="mt-6 text-sm font-medium text-neutral-400 transition group-hover:text-amber-700">
+                  Open section
+                </div>
+              </a>
+            ))}
           </div>
         </div>
       </div>

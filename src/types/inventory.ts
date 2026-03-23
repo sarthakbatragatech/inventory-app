@@ -37,7 +37,15 @@ export interface UploadResponse {
   rowsImported: number;
   uniqueItemsMatched?: number;
   newItemsCreated?: number;
+  newItems?: Array<{
+    id: string;
+    sku: string;
+    itemName: string;
+    family: string | null;
+  }>;
   aliasesCreated?: number;
+  overwrittenRows?: number;
+  overwrittenDates?: number;
   error?: string;
 }
 

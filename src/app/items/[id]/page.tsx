@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { ItemHeaderEditor } from '@/components/items/item-detail-client';
 import { InwardTrendChart } from '@/components/items/inward-trend-chart';
 import { deriveItemFamily } from '@/lib/item-family';
 import { resolveItemFamilies } from '@/lib/item-family-links';
+import { normalizeItemName } from '@/lib/sku-normalizer';
 import { getSupabaseServerClient } from '@/lib/supabase';
 
 type PageProps = {
@@ -81,32 +83,12 @@ function formatInwardDate(value: string) {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
-function formatCategory(category: string | null) {
-  if (!category) {
-    return 'Unknown';
-  }
-
-  return category
-    .split('_')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function getCategoryStyles(category: string | null) {
-  switch (category) {
-    case 'plastic_part':
-      return 'bg-amber-100 text-amber-900 border-amber-200';
-    case 'electronic':
-      return 'bg-sky-100 text-sky-900 border-sky-200';
-    case 'metal_part':
-      return 'bg-slate-200 text-slate-900 border-slate-300';
-    case 'packaging':
-      return 'bg-emerald-100 text-emerald-900 border-emerald-200';
-    case 'raw_material':
-      return 'bg-rose-100 text-rose-900 border-rose-200';
-    default:
-      return 'bg-neutral-100 text-neutral-700 border-neutral-200';
-  }
+function normalizeAliasForComparison(value: string) {
+  return normalizeItemName(value)
+    .toLowerCase()
+    .replace(/[-_/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function extractSupplier(rawPayload: Record<string, unknown> | null): string | null {
@@ -118,6 +100,45 @@ function extractSupplier(rawPayload: Record<string, unknown> | null): string | n
   const normalized = typeof candidate === 'string' ? candidate.trim() : String(candidate ?? '').trim();
 
   return normalized || null;
+}
+
+function formatCategory(value: string | null) {
+  return String(value ?? 'raw_material')
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function getLastInwardValueClasses(value: string) {
+  if (value.length >= 28) {
+    return 'text-[1.05rem] sm:text-[1.1rem] lg:text-[1rem] xl:text-[1.15rem]';
+  }
+
+  if (value.length >= 24) {
+    return 'text-[1.15rem] sm:text-[1.2rem] lg:text-[1.08rem] xl:text-[1.28rem]';
+  }
+
+  if (value.length >= 20) {
+    return 'text-[1.28rem] sm:text-[1.4rem] lg:text-[1.25rem] xl:text-[1.5rem]';
+  }
+
+  return 'text-[1.45rem] sm:text-[1.7rem] lg:text-[1.6rem] xl:text-[1.85rem]';
+}
+
+function getSupplierValueClasses(value: string) {
+  if (value.length >= 26) {
+    return 'text-[1rem] sm:text-[1.08rem] lg:text-[0.98rem] xl:text-[1.12rem]';
+  }
+
+  if (value.length >= 20) {
+    return 'text-[1.1rem] sm:text-[1.18rem] lg:text-[1.05rem] xl:text-[1.22rem]';
+  }
+
+  if (value.length >= 14) {
+    return 'text-[1.28rem] sm:text-[1.38rem] lg:text-[1.2rem] xl:text-[1.45rem]';
+  }
+
+  return 'text-[1.5rem] sm:text-[1.62rem] lg:text-[1.4rem] xl:text-[1.75rem]';
 }
 
 export default async function ItemPage({ params }: PageProps) {
@@ -143,7 +164,10 @@ export default async function ItemPage({ params }: PageProps) {
 
   const currentItem = item as ItemRecord;
 
-  const [{ data: aliases, error: aliasError }, { data: batches, error: batchError }] =
+  const [
+    { data: aliases, error: aliasError },
+    { data: batches, error: batchError },
+  ] =
     await Promise.all([
       supabase.from('item_aliases').select('alias').eq('item_id', id).order('alias'),
       supabase
@@ -222,7 +246,13 @@ export default async function ItemPage({ params }: PageProps) {
     rowUnits.length === 1
       ? rowUnits[0]
       : normalizeDisplayUnit(currentItem.default_unit);
-  const aliasesList = ((aliases ?? []) as AliasRecord[]).map((record) => record.alias);
+  const aliasesList = ((aliases ?? []) as AliasRecord[])
+    .map((record) => record.alias.trim())
+    .filter(Boolean);
+  const normalizedCurrentName = normalizeAliasForComparison(currentItem.item_name);
+  const visibleAliases = aliasesList.filter(
+    (alias) => normalizeAliasForComparison(alias) !== normalizedCurrentName
+  );
   const { familyByItemId } = await resolveItemFamilies([currentItem]);
   const derivedFamily =
     currentItem.family || deriveItemFamily(currentItem.item_name, currentItem.sku);
@@ -230,119 +260,119 @@ export default async function ItemPage({ params }: PageProps) {
   const primaryFamily = families[0] ?? null;
   const sharedFamilies = families.slice(1);
   const suppliers = [...new Set(historyRows.map((row) => row.supplier).filter((value): value is string => Boolean(value)))];
-
+  const lastInwardDisplay = lastInward?.inward_date
+    ? formatInwardDate(lastInward.inward_date)
+    : '—';
+  const lastInwardQuantityDisplay =
+    lastInward?.quantity !== null && lastInward?.quantity !== undefined
+      ? formatQuantity(lastInward.quantity, lastInward.displayUnit || displayUnit)
+      : null;
+  const lastInwardSummary = `${lastInwardDisplay}${
+    lastInwardQuantityDisplay ? ` (${lastInwardQuantityDisplay})` : ''
+  }`;
+  const supplierSummary = suppliers.length ? suppliers.join(', ') : 'Unknown';
   return (
-    <div className="min-h-screen bg-neutral-50 p-6">
+    <div className="min-h-screen bg-[linear-gradient(180deg,#fafaf9_0%,#f8fafc_40%,#ffffff_100%)] p-4 sm:p-6">
       <div className="mx-auto max-w-6xl space-y-6">
         <div className="space-y-3">
           <Link
             href="/items"
-            className="inline-flex text-sm text-neutral-600 underline decoration-neutral-300 underline-offset-4 transition hover:text-neutral-900 hover:decoration-neutral-900"
+            className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white/90 px-4 py-2 text-sm font-medium text-neutral-600 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
           >
+            <span aria-hidden="true" className="text-base leading-none">←</span>
             Back to SKU List
           </Link>
-          <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-              <div className="space-y-3">
+          <div className="relative overflow-hidden rounded-[2rem] border border-neutral-200/80 bg-white p-6 shadow-[0_24px_70px_-36px_rgba(15,23,42,0.28)] sm:p-8">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.1),transparent_30%),radial-gradient(circle_at_top_right,rgba(251,191,36,0.12),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.95),rgba(248,250,252,0.88))]" />
+            <div className="pointer-events-none absolute -left-12 top-24 h-44 w-44 rounded-full bg-sky-100/50 blur-3xl" />
+            <div className="pointer-events-none absolute right-0 top-0 h-48 w-48 rounded-full bg-amber-100/50 blur-3xl" />
+
+            <div className="relative space-y-6">
+              <div className="min-w-0 space-y-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
                   {currentItem.sku}
                 </p>
                 <div>
-                  <h1 className="text-3xl font-semibold text-neutral-950">
+                  <h1 className="text-4xl font-semibold tracking-tight text-neutral-950 sm:text-5xl">
                     {currentItem.item_name}
                   </h1>
-                  <p className="mt-2 text-sm text-neutral-600">
-                    Inward history across the latest successful import for each file.
-                  </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {primaryFamily ? (
-                    <span className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700">
-                      Primary Family: {primaryFamily}
-                    </span>
-                  ) : (
-                    <span className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700">
-                      Primary Family: Unknown
-                    </span>
-                  )}
-                  {sharedFamilies.length ? (
-                    <span className="inline-flex rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-700">
-                      Shared Families: {sharedFamilies.join(', ')}
-                    </span>
-                  ) : null}
-                  {suppliers.length ? (
-                    <span className="inline-flex rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-700">
-                      Suppliers: {suppliers.join(', ')}
-                    </span>
-                  ) : null}
-                  <span
-                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getCategoryStyles(
-                      currentItem.category
-                    )}`}
-                  >
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="inline-flex rounded-full border border-neutral-200 bg-white/85 px-4 py-2 text-sm font-medium text-neutral-700 shadow-sm">
+                    Primary Family: {primaryFamily ?? 'Unknown'}
+                  </span>
+                  <span className="inline-flex rounded-full border border-amber-200 bg-amber-50/90 px-4 py-2 text-sm font-medium text-amber-900 shadow-sm">
                     Category: {formatCategory(currentItem.category)}
                   </span>
-                  {aliasesList.length > 0 ? (
-                    <span className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700">
-                      Known aliases
-                    </span>
-                  ) : null}
-                  {aliasesList.map((alias) => (
-                    <span
-                      key={alias}
-                      className="inline-flex rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-700"
-                    >
-                      {alias}
-                    </span>
-                  ))}
+                  <ItemHeaderEditor itemId={String(currentItem.id)} />
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-neutral-500">
-                    Total Quantity
+              <div className="grid gap-3 lg:grid-cols-3">
+                <div className="min-w-0 rounded-[1.6rem] border border-sky-200/80 bg-[linear-gradient(180deg,rgba(240,249,255,0.96),rgba(255,255,255,0.96))] px-5 py-3 shadow-sm">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-sky-700/70">
+                    Total Inward Quantity
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-neutral-950">
+                  <p className="mt-1.5 break-words text-3xl font-semibold tracking-tight text-neutral-950 sm:text-[2.25rem]">
                     {formatQuantity(totalQty, displayUnit)}
                   </p>
                 </div>
-                <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-neutral-500">
+                <div className="min-w-0 rounded-[1.6rem] border border-amber-200/80 bg-[linear-gradient(180deg,rgba(255,251,235,0.96),rgba(255,255,255,0.96))] px-5 py-3 shadow-sm">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-amber-700/75">
                     Last Inward
                   </p>
-                  <p className="mt-2 text-lg font-semibold text-neutral-950">
-                    {lastInward?.inward_date
-                      ? formatInwardDate(lastInward.inward_date)
-                      : '—'}
+                  <p
+                    className={`mt-1.5 whitespace-nowrap font-semibold leading-tight tracking-tight text-neutral-950 ${getLastInwardValueClasses(lastInwardSummary)}`}
+                  >
+                    {lastInwardSummary}
                   </p>
-                  <p className="mt-1 text-sm text-neutral-600">
-                    {lastInward?.quantity !== null && lastInward?.quantity !== undefined
-                      ? formatQuantity(
-                          lastInward.quantity,
-                          lastInward.displayUnit || displayUnit
-                        )
-                      : 'No inward rows'}
+                </div>
+                <div className="min-w-0 rounded-[1.6rem] border border-emerald-200/80 bg-[linear-gradient(180deg,rgba(236,253,245,0.96),rgba(255,255,255,0.96))] px-5 py-3 shadow-sm">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-700/75">
+                    Suppliers
+                  </p>
+                  <p
+                    className={`mt-1.5 whitespace-nowrap font-semibold leading-tight tracking-tight text-neutral-950 ${getSupplierValueClasses(supplierSummary)}`}
+                  >
+                    {supplierSummary}
                   </p>
                 </div>
               </div>
+
+              {sharedFamilies.length || visibleAliases.length > 0 ? (
+                <div className="border-t border-neutral-200/80 pt-5">
+                  <div className="flex flex-wrap gap-2">
+                    {sharedFamilies.length ? (
+                      <span className="inline-flex rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 shadow-sm">
+                        Shared Families: {sharedFamilies.join(', ')}
+                      </span>
+                    ) : null}
+                    {visibleAliases.length > 0 ? (
+                      <span className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 px-3 py-1.5 text-xs font-medium text-neutral-700">
+                        Known aliases
+                      </span>
+                    ) : null}
+                    {visibleAliases.map((alias) => (
+                      <span
+                        key={alias}
+                        className="inline-flex rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 shadow-sm"
+                      >
+                        {alias}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
 
         <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
-          <div className="border-b border-neutral-200 px-6 py-4">
-            <h2 className="text-lg font-semibold text-neutral-950">Quantity Over Time</h2>
-          </div>
-
           {historyRows.length ? (
             <div className="px-6 py-6">
               <div className="rounded-[1.75rem] border border-neutral-200 bg-neutral-50 p-4">
                 <InwardTrendChart />
               </div>
-              <p className="mt-3 text-xs text-neutral-500">
-                Hover points to inspect exact inward quantities over time.
-              </p>
             </div>
           ) : (
             <div className="px-6 py-12 text-center text-sm text-neutral-600">

@@ -107,7 +107,7 @@ export function InwardTrendChart() {
         x: {
           field: 'inwardDate',
           type: 'temporal',
-          title: 'Inward Date',
+          title: null,
           timeUnit: 'yearmonthdate',
           axis: {
             format: '%d %b %Y',
@@ -210,5 +210,12 @@ export function InwardTrendChart() {
     );
   }
 
-  return <div ref={containerRef} className="w-full" />;
+  return (
+    <div>
+      <div ref={containerRef} className="w-full" />
+      <p className="mt-3 text-center text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">
+        Quantity Over Time
+      </p>
+    </div>
+  );
 }
