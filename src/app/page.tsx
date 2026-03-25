@@ -2,19 +2,14 @@ import { Brand } from '@/components/brand';
 
 const homeLinks = [
   {
-    href: '/upload',
-    title: 'Upload inward Excel',
-    description: 'Add a new inward batch from employee-maintained Excel.',
+    href: '/tools',
+    title: 'Tools',
+    description: 'Upload inward Excel files and review import-history status in one place.',
   },
   {
     href: '/items',
     title: 'Inward Data',
     description: 'Review inwarded SKUs, quantities, and latest receipts.',
-  },
-  {
-    href: '/imports',
-    title: 'Import history',
-    description: 'See all uploaded Excel batches.',
   },
   {
     href: '/bom',
@@ -25,6 +20,11 @@ const homeLinks = [
     href: '/stock',
     title: 'Stock',
     description: 'Review inventory-wide inward, sales consumption, and current balance.',
+  },
+  {
+    href: '/reconciliation',
+    title: 'Reconciliation',
+    description: 'Capture end-of-day physical stock counts that stay fixed for that date.',
   },
   {
     href: '/model-analysis',

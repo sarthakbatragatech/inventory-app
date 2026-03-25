@@ -41,6 +41,12 @@ export default function RootLayout({
                 Home
               </Link>
               <Link
+                href="/tools"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-neutral-200 hover:text-neutral-950"
+              >
+                Tools
+              </Link>
+              <Link
                 href="/bom"
                 className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-amber-100 hover:text-amber-950"
               >
@@ -51,6 +57,12 @@ export default function RootLayout({
                 className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-emerald-100 hover:text-emerald-950"
               >
                 Stock
+              </Link>
+              <Link
+                href="/reconciliation"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-stone-200 hover:text-stone-950"
+              >
+                Reconciliation
               </Link>
               <Link
                 href="/model-analysis"

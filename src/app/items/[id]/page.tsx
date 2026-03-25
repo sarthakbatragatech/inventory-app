@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ItemHeaderEditor } from '@/components/items/item-detail-client';
+import { InwardHistoryEditor } from '@/components/items/inward-history-editor';
 import { InwardTrendChart } from '@/components/items/inward-trend-chart';
 import { deriveItemFamily } from '@/lib/item-family';
 import { resolveItemFamilies } from '@/lib/item-family-links';
@@ -37,6 +38,7 @@ type AliasRecord = {
 };
 
 type ImportRowRecord = {
+  id: string;
   batch_id: string;
   raw_row_no: number;
   raw_item_name: string;
@@ -51,6 +53,13 @@ type HistoryRow = ImportRowRecord & {
   displayUnit: string | null;
   supplier: string | null;
   batch: BatchRecord | null;
+};
+
+type ItemOptionRecord = {
+  id: string;
+  sku: string;
+  item_name: string;
+  default_unit: string | null;
 };
 
 function normalizeDisplayUnit(unit: string | null): string | null {
@@ -167,6 +176,7 @@ export default async function ItemPage({ params }: PageProps) {
   const [
     { data: aliases, error: aliasError },
     { data: batches, error: batchError },
+    { data: itemOptionsData, error: itemOptionsError },
   ] =
     await Promise.all([
       supabase.from('item_aliases').select('alias').eq('item_id', id).order('alias'),
@@ -175,6 +185,12 @@ export default async function ItemPage({ params }: PageProps) {
         .select('id, file_name, uploaded_at, status')
         .eq('status', 'processed')
         .order('uploaded_at', { ascending: false }),
+      supabase
+        .from('items')
+        .select('id, sku, item_name, default_unit')
+        .eq('active', true)
+        .order('item_name', { ascending: true })
+        .limit(2000),
     ]);
 
   if (aliasError) {
@@ -183,6 +199,10 @@ export default async function ItemPage({ params }: PageProps) {
 
   if (batchError) {
     throw new Error(batchError.message);
+  }
+
+  if (itemOptionsError) {
+    throw new Error(itemOptionsError.message);
   }
 
   const latestBatches = [
@@ -201,7 +221,7 @@ export default async function ItemPage({ params }: PageProps) {
     const { data, error } = await supabase
       .from('import_batch_rows')
       .select(
-        'batch_id, raw_row_no, raw_item_name, quantity, unit, color, inward_date, raw_payload'
+        'id, batch_id, raw_row_no, raw_item_name, quantity, unit, color, inward_date, raw_payload'
       )
       .eq('item_id', id)
       .in('batch_id', batchChunk);
@@ -214,8 +234,19 @@ export default async function ItemPage({ params }: PageProps) {
   }
 
   const historyRows: HistoryRow[] = importRows
-    .filter((row) => row.inward_date)
     .sort((left, right) => {
+      if (!left.inward_date && !right.inward_date) {
+        return right.raw_row_no - left.raw_row_no;
+      }
+
+      if (!left.inward_date) {
+        return 1;
+      }
+
+      if (!right.inward_date) {
+        return -1;
+      }
+
       const dateComparison =
         new Date(right.inward_date as string).getTime() -
         new Date(left.inward_date as string).getTime();
@@ -241,7 +272,7 @@ export default async function ItemPage({ params }: PageProps) {
     ),
   ];
   const totalQty = historyRows.reduce((sum, row) => sum + (row.quantity || 0), 0);
-  const lastInward = historyRows[0] ?? null;
+  const lastInward = historyRows.find((row) => Boolean(row.inward_date)) ?? null;
   const displayUnit =
     rowUnits.length === 1
       ? rowUnits[0]
@@ -253,6 +284,12 @@ export default async function ItemPage({ params }: PageProps) {
   const visibleAliases = aliasesList.filter(
     (alias) => normalizeAliasForComparison(alias) !== normalizedCurrentName
   );
+  const itemOptions = ((itemOptionsData ?? []) as ItemOptionRecord[]).map((option) => ({
+    id: option.id,
+    sku: option.sku,
+    item_name: option.item_name,
+    default_unit: normalizeDisplayUnit(option.default_unit),
+  }));
   const { familyByItemId } = await resolveItemFamilies([currentItem]);
   const derivedFamily =
     currentItem.family || deriveItemFamily(currentItem.item_name, currentItem.sku);
@@ -390,41 +427,14 @@ export default async function ItemPage({ params }: PageProps) {
           </div>
 
           {historyRows.length ? (
-            <table className="min-w-full text-sm">
-              <thead className="bg-neutral-100 text-left text-neutral-700">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Date</th>
-                  <th className="px-4 py-3 font-semibold">Quantity</th>
-                  <th className="px-4 py-3 font-semibold">Supplier</th>
-                  <th className="px-4 py-3 font-semibold">Color / Type</th>
-                  <th className="px-4 py-3 font-semibold">Imported As</th>
-                  <th className="px-4 py-3 font-semibold">Source File</th>
-                </tr>
-              </thead>
-              <tbody>
-                {historyRows.map((row) => (
-                  <tr key={`${row.batch_id}-${row.raw_row_no}`} className="border-t border-neutral-200">
-                    <td className="px-4 py-3 text-neutral-700">
-                      {row.inward_date ? formatInwardDate(row.inward_date) : '—'}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-neutral-950">
-                      {row.quantity !== null && row.quantity !== undefined
-                        ? formatQuantity(row.quantity, row.displayUnit)
-                        : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-neutral-700">{row.supplier || '—'}</td>
-                    <td className="px-4 py-3 text-neutral-700">{row.color || '—'}</td>
-                    <td className="px-4 py-3 text-neutral-700">{row.raw_item_name || '—'}</td>
-                    <td className="px-4 py-3 text-neutral-700">
-                      <div>{row.batch?.file_name || '—'}</div>
-                      <div className="text-xs text-neutral-500">
-                        Row {row.raw_row_no}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <InwardHistoryEditor
+                currentItemId={currentItem.id}
+                currentItemSku={currentItem.sku}
+                rows={historyRows}
+                itemOptions={itemOptions}
+              />
+            </div>
           ) : (
             <div className="px-6 py-12 text-center text-sm text-neutral-600">
               No inward history found for this item.

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getBomDetailBySku } from '@/lib/bom';
-import { getSupabaseInventoryServerClient } from '@/lib/supabase';
+import { saveBomVersion } from '@/lib/bom';
 
 type UpdateBomVersionRequest = {
   effectiveFrom?: string;
@@ -17,16 +16,6 @@ type UpdateBomVersionRequest = {
 
 function isIsoDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-function getFgSkuFromVersion(version: {
-  bom_models: { fg_sku: string } | Array<{ fg_sku: string }>;
-}) {
-  const relation = Array.isArray(version.bom_models)
-    ? version.bom_models[0]
-    : version.bom_models;
-
-  return relation?.fg_sku ?? '';
 }
 
 export async function PUT(
@@ -47,91 +36,26 @@ export async function PUT(
       );
     }
 
-    const normalizedLines = lines.map((line, index) => ({
-      component_item_id: line.componentItemId?.trim() ?? '',
-      component_sku: line.componentSku?.trim() ?? '',
-      component_name: line.componentName?.trim() ?? '',
-      qty_per_fg: Number(line.qtyPerFg),
-      unit: line.unit?.trim() || null,
-      sort_order: index,
-      notes: line.notes?.trim() || null,
-    }));
-
-    const invalidLine = normalizedLines.find(
-      (line) =>
-        !line.component_item_id ||
-        !line.component_sku ||
-        !line.component_name ||
-        !Number.isFinite(line.qty_per_fg) ||
-        line.qty_per_fg <= 0
-    );
-
-    if (invalidLine) {
-      return NextResponse.json(
-        { error: 'Every BOM line needs a component SKU, name, item id, and qty_per_fg > 0.' },
-        { status: 400 }
-      );
-    }
-
-    const supabase = getSupabaseInventoryServerClient();
-    const { data: version, error: versionError } = await supabase
-      .from('bom_versions')
-      .select('id, bom_model_id, bom_models!inner(fg_sku)')
-      .eq('id', versionId)
-      .single();
-
-    if (versionError) {
-      return NextResponse.json({ error: versionError.message }, { status: 500 });
-    }
-
-    const fgSku = getFgSkuFromVersion(version);
-
-    if (!fgSku) {
-      return NextResponse.json({ error: 'BOM model lookup failed.' }, { status: 500 });
-    }
-
-    const { error: updateVersionError } = await supabase
-      .from('bom_versions')
-      .update({
-        effective_from: effectiveFrom,
-        notes: body.notes?.trim() || null,
-      })
-      .eq('id', versionId);
-
-    if (updateVersionError) {
-      return NextResponse.json({ error: updateVersionError.message }, { status: 500 });
-    }
-
-    const { error: deleteLinesError } = await supabase
-      .from('bom_lines')
-      .delete()
-      .eq('bom_version_id', versionId);
-
-    if (deleteLinesError) {
-      return NextResponse.json({ error: deleteLinesError.message }, { status: 500 });
-    }
-
-    if (normalizedLines.length > 0) {
-      const { error: insertLinesError } = await supabase.from('bom_lines').insert(
-        normalizedLines.map((line) => ({
-          bom_version_id: versionId,
-          ...line,
-        }))
-      );
-
-      if (insertLinesError) {
-        return NextResponse.json({ error: insertLinesError.message }, { status: 500 });
-      }
-    }
-
-    const detail = await getBomDetailBySku(fgSku);
+    const result = await saveBomVersion(versionId, {
+      effectiveFrom,
+      notes: body.notes?.trim() || null,
+      lines: lines.map((line) => ({
+        componentItemId: line.componentItemId?.trim() ?? '',
+        componentSku: line.componentSku?.trim() ?? '',
+        componentName: line.componentName?.trim() ?? '',
+        qtyPerFg: Number(line.qtyPerFg),
+        unit: line.unit?.trim() || null,
+        notes: line.notes?.trim() || null,
+      })),
+    });
 
     return NextResponse.json({
       ok: true,
-      detail,
+      detail: result.detail,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown BOM update error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const status = /qty_per_fg > 0|required/i.test(message) ? 400 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

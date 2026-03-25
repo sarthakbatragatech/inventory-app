@@ -30,19 +30,45 @@ export default async function BomPage() {
     left.fg_sku.localeCompare(right.fg_sku)
   );
   const initialFgSku = bomModels[0]?.fg_sku ?? catalogOptions[0]?.fg_sku ?? '';
+  const catalogCount = catalogOptions.length;
+  const modelCount = bomModels.length;
+  const componentCount = componentItems.length;
 
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-6 sm:p-6">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-6 rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm">
-          <h1 className="text-3xl font-semibold tracking-tight text-neutral-950">
-            BOM Management
-          </h1>
-          <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-700">
-            Define model BOMs version by version. Finished-good SKUs come from synced
-            sales data, while component lines point to your local inventory SKUs so you
-            can derive consumption from outward sales later.
-          </p>
+        <div className="mb-6 overflow-hidden rounded-[2rem] border border-neutral-200 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.12),transparent_32%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.12),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm">
+          <div className="grid gap-4 p-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)] lg:items-end">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+                BOM Workspace
+              </div>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-950">
+                BOM Management
+              </h1>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+              <div className="rounded-2xl border border-neutral-200 bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  Sales Models
+                </div>
+                <div className="mt-1 text-2xl font-semibold text-neutral-950">{catalogCount}</div>
+              </div>
+              <div className="rounded-2xl border border-neutral-200 bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  BOM Models
+                </div>
+                <div className="mt-1 text-2xl font-semibold text-neutral-950">{modelCount}</div>
+              </div>
+              <div className="rounded-2xl border border-neutral-200 bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  Components
+                </div>
+                <div className="mt-1 text-2xl font-semibold text-neutral-950">{componentCount}</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <BomManager

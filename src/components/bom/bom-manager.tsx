@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 
 type CatalogOption = {
   fg_sku: string;
@@ -127,6 +127,7 @@ export function BomManager({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedCatalog =
     catalogOptions.find((option) => option.fg_sku === selectedFgSku) ?? null;
@@ -139,6 +140,9 @@ export function BomManager({
         return haystack.includes(normalizedCatalogSearch);
       })
     : catalogOptions;
+  const selectedModelName = selectedCatalog?.fg_name || detail?.model.fg_name || 'No BOM yet';
+  const versionCount = detail?.versions.length ?? 0;
+  const selectedLineCount = lines.length;
 
   function resetEditorState() {
     setDetail(null);
@@ -167,37 +171,35 @@ export function BomManager({
 
     let cancelled = false;
 
-    startTransition(() => {
-      void fetch(`/api/bom?fgSku=${encodeURIComponent(selectedFgSku)}`)
-        .then(async (response) => {
-          const payload = (await response.json()) as { detail?: BomDetail; error?: string };
-          if (!response.ok) {
-            throw new Error(payload.error || 'Failed to load BOM.');
-          }
+    void fetch(`/api/bom?fgSku=${encodeURIComponent(selectedFgSku)}`)
+      .then(async (response) => {
+        const payload = (await response.json()) as { detail?: BomDetail; error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error || 'Failed to load BOM.');
+        }
 
-          if (cancelled) {
-            return;
-          }
+        if (cancelled) {
+          return;
+        }
 
-          const nextDetail = payload.detail ?? null;
-          setDetail(nextDetail);
+        const nextDetail = payload.detail ?? null;
+        setDetail(nextDetail);
 
-          const latestVersion = nextDetail?.versions[0] ?? null;
-          selectVersion(nextDetail, latestVersion?.id ?? '');
-          setError(null);
-          setStatus(null);
-        })
-        .catch((loadError: unknown) => {
-          if (cancelled) {
-            return;
-          }
+        const latestVersion = nextDetail?.versions[0] ?? null;
+        selectVersion(nextDetail, latestVersion?.id ?? '');
+        setError(null);
+        setStatus(null);
+      })
+      .catch((loadError: unknown) => {
+        if (cancelled) {
+          return;
+        }
 
-          setDetail(null);
-          setSelectedVersionId('');
-          setLines([]);
-          setError(loadError instanceof Error ? loadError.message : 'Failed to load BOM.');
-        });
-    });
+        setDetail(null);
+        setSelectedVersionId('');
+        setLines([]);
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load BOM.');
+      });
 
     return () => {
       cancelled = true;
@@ -228,7 +230,7 @@ export function BomManager({
       fgName: selectedCatalog?.fg_name ?? detail?.model.fg_name ?? null,
       sourceItemId: selectedCatalog?.source_item_id ?? detail?.model.source_item_id ?? null,
       effectiveFrom,
-      notes: versionNotes,
+      notes: '',
     };
 
     startTransition(() => {
@@ -349,192 +351,289 @@ export function BomManager({
     setLines((current) => current.filter((_, lineIndex) => lineIndex !== index));
   }
 
+  function exportCsv() {
+    if (!selectedVersionId) {
+      setError('Select a BOM version before exporting.');
+      return;
+    }
+
+    window.open(`/api/bom/${selectedVersionId}/export`, '_blank', 'noopener,noreferrer');
+  }
+
+  function triggerImportPicker() {
+    if (!selectedVersionId || isPending) {
+      setError('Select a BOM version before importing.');
+      return;
+    }
+
+    importInputRef.current?.click();
+  }
+
+  function importCsv(file: File) {
+    if (!selectedVersionId) {
+      setError('Select a BOM version before importing.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    startTransition(() => {
+      void fetch(`/api/bom/${selectedVersionId}/import`, {
+        method: 'POST',
+        body: formData,
+      })
+        .then(async (response) => {
+          const result = (await response.json()) as {
+            ok?: boolean;
+            importedLineCount?: number;
+            detail?: BomDetail | null;
+            error?: string;
+          };
+
+          if (!response.ok) {
+            throw new Error(result.error || 'Failed to import BOM CSV.');
+          }
+
+          syncDetail(result.detail ?? null, selectedVersionId);
+          setStatus(`Imported ${result.importedLineCount ?? 0} BOM lines from CSV.`);
+          setError(null);
+        })
+        .catch((importError: unknown) => {
+          setError(importError instanceof Error ? importError.message : 'Failed to import BOM CSV.');
+          setStatus(null);
+        })
+        .finally(() => {
+          if (importInputRef.current) {
+            importInputRef.current.value = '';
+          }
+        });
+    });
+  }
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
-      <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-neutral-950">Model BOMs</h2>
-        <p className="mt-2 text-sm leading-6 text-neutral-600">
-          Start from a finished-good SKU from synced sales, then create versioned BOM
-          definitions for that model.
-        </p>
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-[2rem] border border-neutral-200 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.12),transparent_34%),radial-gradient(circle_at_top_right,rgba(14,165,233,0.16),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] p-4 shadow-sm">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_320px]">
+          <div className="rounded-[1.6rem] border border-neutral-200/80 bg-white/88 p-4 shadow-sm backdrop-blur">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+                  BOM Management
+                </div>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-950">
+                  Build Versioned BOMs
+                </h2>
+                <div className="mt-2 text-sm text-neutral-600">
+                  {selectedFgSku
+                    ? `${selectedModelName} · ${selectedLineCount} line${selectedLineCount === 1 ? '' : 's'} · ${versionCount} version${versionCount === 1 ? '' : 's'}`
+                    : 'Choose a finished-good SKU to begin.'}
+                </div>
+              </div>
 
-        <div className="mt-5 space-y-4">
-          <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-              Search finished-good SKU
-            </span>
-            <input
-              type="text"
-              value={catalogSearch}
-              onChange={(event) => setCatalogSearch(event.target.value)}
-              placeholder="Search by FG SKU or model name"
-              className="mt-2 w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
-            />
-          </label>
+              <button
+                type="button"
+                onClick={() => void createVersion()}
+                disabled={isPending || !selectedFgSku}
+                className="rounded-2xl bg-gradient-to-r from-neutral-950 to-neutral-800 px-4 py-2.5 text-sm font-medium text-white transition hover:from-neutral-900 hover:to-neutral-700 disabled:cursor-not-allowed disabled:from-neutral-300 disabled:to-neutral-300"
+              >
+                Create new BOM version
+              </button>
+            </div>
 
-          <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-              Finished-good SKU
-            </span>
-            <select
-              value={selectedFgSku}
-              onChange={(event) => {
-                const nextSku = event.target.value;
-                if (!nextSku) {
-                  resetEditorState();
-                }
-                setSelectedFgSku(nextSku);
-              }}
-              className="mt-2 w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
-            >
-              <option value="">Select a model SKU</option>
-              {filteredCatalogOptions.map((option) => (
-                <option key={option.fg_sku} value={option.fg_sku}>
-                  {formatCatalogLabel(option)}
-                </option>
-              ))}
-            </select>
-            <div className="mt-2 text-xs text-neutral-500">
-              Showing {filteredCatalogOptions.length} of {catalogOptions.length} sales SKUs.
-            </div>
-          </label>
+            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.9fr)_minmax(220px,0.8fr)]">
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  Search finished-good SKU
+                </span>
+                <input
+                  type="text"
+                  value={catalogSearch}
+                  onChange={(event) => setCatalogSearch(event.target.value)}
+                  placeholder="Search by FG SKU or model name"
+                  className="mt-2 w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
+                />
+              </label>
 
-          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-              Current model
-            </div>
-            <div className="mt-2 text-base font-medium text-neutral-950">
-              {selectedCatalog?.fg_name || detail?.model.fg_name || 'No BOM yet'}
-            </div>
-            <div className="mt-1 text-sm text-neutral-600">
-              {selectedFgSku || 'Choose a finished-good SKU to begin.'}
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  Finished-good SKU
+                </span>
+                <select
+                  value={selectedFgSku}
+                  onChange={(event) => {
+                    const nextSku = event.target.value;
+                    if (!nextSku) {
+                      resetEditorState();
+                    }
+                    setSelectedFgSku(nextSku);
+                  }}
+                  className="mt-2 w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
+                >
+                  <option value="">Select a model SKU</option>
+                  {filteredCatalogOptions.map((option) => (
+                    <option key={option.fg_sku} value={option.fg_sku}>
+                      {formatCatalogLabel(option)}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-2 text-xs text-neutral-500">
+                  Showing {filteredCatalogOptions.length} of {catalogOptions.length} sales SKUs.
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  Effective from
+                </span>
+                <input
+                  type="date"
+                  value={effectiveFrom}
+                  onChange={(event) => setEffectiveFrom(event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
+                />
+              </label>
             </div>
           </div>
 
-          <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-              Effective from
-            </span>
-            <input
-              type="date"
-              value={effectiveFrom}
-              onChange={(event) => setEffectiveFrom(event.target.value)}
-              className="mt-2 w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
-            />
-            <div className="mt-2 text-xs text-neutral-500">
-              Defaulted to 2025-11-01 for historical BOM backfill.
+          <div className="rounded-[1.6rem] border border-neutral-200 bg-white/92 p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                Existing versions
+              </div>
+              <div className="text-xs text-neutral-500">
+                {versionCount} total
+              </div>
             </div>
-          </label>
 
-          <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-              Version notes
-            </span>
-            <textarea
-              value={versionNotes}
-              onChange={(event) => setVersionNotes(event.target.value)}
-              rows={3}
-              className="mt-2 w-full rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
-              placeholder="Why this BOM version exists"
-            />
-          </label>
-
-          <button
-            type="button"
-            onClick={() => void createVersion()}
-            disabled={isPending || !selectedFgSku}
-            className="w-full rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
-          >
-            Create new BOM version
-          </button>
-
-          <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-              Existing versions
-            </div>
-            {detail?.versions.length ? (
-              detail.versions.map((version) => (
-                <button
-                  key={version.id}
-                  type="button"
-                  onClick={() => selectVersion(detail, version.id)}
-                  className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
-                    version.id === selectedVersionId
-                      ? 'border-neutral-950 bg-neutral-950 text-white'
-                      : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-300 hover:bg-neutral-50'
-                  }`}
-                >
-                  <div className="text-sm font-medium">
-                    v{version.version_no} · {version.effective_from}
-                  </div>
-                  <div
-                    className={`mt-1 text-xs ${
-                      version.id === selectedVersionId ? 'text-neutral-200' : 'text-neutral-500'
+            <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+              {detail?.versions.length ? (
+                detail.versions.map((version) => (
+                  <button
+                    key={version.id}
+                    type="button"
+                    onClick={() => selectVersion(detail, version.id)}
+                    className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+                      version.id === selectedVersionId
+                        ? 'border-neutral-950 bg-neutral-950 text-white shadow-sm'
+                        : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-300 hover:bg-neutral-50'
                     }`}
                   >
-                    {version.lines.length} component{version.lines.length === 1 ? '' : 's'}
-                  </div>
-                </button>
-              ))
-            ) : (
-              <div className="rounded-2xl border border-dashed border-neutral-300 px-4 py-5 text-sm text-neutral-500">
-                No BOM version exists for this model yet.
-              </div>
-            )}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-medium">
+                        v{version.version_no} · {version.effective_from}
+                      </div>
+                      <div
+                        className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                          version.id === selectedVersionId
+                            ? 'bg-white/10 text-neutral-100'
+                            : 'bg-neutral-100 text-neutral-600'
+                        }`}
+                      >
+                        {version.lines.length}
+                      </div>
+                    </div>
+                    <div
+                      className={`mt-1 text-xs ${
+                        version.id === selectedVersionId ? 'text-neutral-200' : 'text-neutral-500'
+                      }`}
+                    >
+                      {version.lines.length} component{version.lines.length === 1 ? '' : 's'}
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-neutral-300 px-4 py-5 text-sm text-neutral-500">
+                  No BOM version exists for this model yet.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-neutral-200 pb-5 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-neutral-950">Component lines</h2>
-            <p className="mt-2 text-sm leading-6 text-neutral-600">
-              Each row defines how much of a component SKU is consumed when one unit of
-              the selected model is made.
-            </p>
-          </div>
+      <section className="overflow-hidden rounded-[2rem] border border-neutral-200 bg-white shadow-sm">
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              importCsv(file);
+            }
+          }}
+        />
+        <div className="border-b border-neutral-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.94),rgba(255,255,255,0.96))] px-5 py-6 sm:px-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+                Component Editor
+              </div>
+              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-neutral-950">
+                {selectedModelName}
+              </h2>
+            </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setLines((current) => [...current, buildEmptyLine()])}
-              disabled={!selectedVersionId || isPending}
-              className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
-            >
-              Add component line
-            </button>
-            <button
-              type="button"
-              onClick={() => void saveVersion()}
-              disabled={!selectedVersionId || isPending}
-              className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-200"
-            >
-              Save BOM lines
-            </button>
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <button
+                type="button"
+                onClick={exportCsv}
+                disabled={!selectedVersionId || isPending}
+                className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={triggerImportPicker}
+                disabled={!selectedVersionId || isPending}
+                className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
+              >
+                Import CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => setLines((current) => [...current, buildEmptyLine()])}
+                disabled={!selectedVersionId || isPending}
+                className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
+              >
+                Add component line
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveVersion()}
+                disabled={!selectedVersionId || isPending}
+                className="rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-2 text-sm font-medium text-white transition hover:from-sky-500 hover:to-cyan-400 disabled:cursor-not-allowed disabled:from-sky-200 disabled:to-sky-200"
+              >
+                Save BOM lines
+              </button>
+            </div>
           </div>
         </div>
 
         {error ? (
-          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <div className="mx-5 mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 sm:mx-6">
             {error}
           </div>
         ) : null}
 
         {status ? (
-          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <div className="mx-5 mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 sm:mx-6">
             {status}
           </div>
         ) : null}
 
         {!selectedVersionId ? (
-          <div className="mt-6 rounded-3xl border border-dashed border-neutral-300 bg-neutral-50 px-6 py-10 text-sm text-neutral-500">
+          <div className="m-5 rounded-3xl border border-dashed border-neutral-300 bg-neutral-50 px-6 py-10 text-sm text-neutral-500 sm:m-6">
             Select a model and create a BOM version before editing component lines.
           </div>
         ) : (
-          <div className="mt-6 overflow-x-auto">
+          <div className="m-5 overflow-hidden rounded-[1.75rem] border border-neutral-200 bg-neutral-50 sm:m-6">
+            <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.14em] text-neutral-500">
+              <thead className="border-b border-neutral-200 bg-white text-left text-xs uppercase tracking-[0.14em] text-neutral-500">
                 <tr>
                   <th className="px-3 py-3">Component SKU</th>
                   <th className="px-3 py-3">Item</th>
@@ -547,7 +646,10 @@ export function BomManager({
               <tbody>
                 {lines.length ? (
                   lines.map((line, index) => (
-                    <tr key={`${selectedVersionId}-${index}`} className="border-b border-neutral-100 align-top">
+                    <tr
+                      key={`${selectedVersionId}-${index}`}
+                      className="border-b border-neutral-200/80 align-top transition odd:bg-neutral-50 even:bg-white"
+                    >
                       <td className="px-3 py-3">
                         <input
                           type="text"
@@ -556,7 +658,7 @@ export function BomManager({
                             updateLine(index, 'componentSearch', event.target.value)
                           }
                           placeholder="Search component SKU or name"
-                          className="w-64 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950"
+                          className="w-64 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 shadow-sm"
                         />
                         <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-neutral-200 bg-neutral-50">
                           {getFilteredComponentOptions(componentOptions, line).map((component) => (
@@ -594,7 +696,7 @@ export function BomManager({
                           step="0.0001"
                           value={line.qtyPerFg}
                           onChange={(event) => updateLine(index, 'qtyPerFg', event.target.value)}
-                          className="w-28 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950"
+                          className="w-28 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 shadow-sm"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -602,7 +704,7 @@ export function BomManager({
                           type="text"
                           value={line.unit}
                           onChange={(event) => updateLine(index, 'unit', event.target.value)}
-                          className="w-24 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950"
+                          className="w-24 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 shadow-sm"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -610,7 +712,7 @@ export function BomManager({
                           type="text"
                           value={line.notes}
                           onChange={(event) => updateLine(index, 'notes', event.target.value)}
-                          className="w-56 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950"
+                          className="w-56 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 shadow-sm"
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -633,6 +735,7 @@ export function BomManager({
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </section>

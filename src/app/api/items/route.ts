@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveItemFamily } from '@/lib/item-family';
 import { resolveItemFamilies } from '@/lib/item-family-links';
+import { normalizeItemName } from '@/lib/sku-normalizer';
 import { getSupabaseServerClient } from '@/lib/supabase';
 
 type BatchRecord = {
@@ -29,6 +30,21 @@ type ImportRowRecord = {
   unit: string | null;
 };
 
+type CreateItemRequest = {
+  sku?: string;
+  itemName?: string;
+  category?: string;
+  defaultUnit?: string | null;
+};
+
+const VALID_CATEGORIES = new Set([
+  'plastic_part',
+  'electronic',
+  'metal_part',
+  'packaging',
+  'raw_material',
+]);
+
 function normalizeDisplayUnit(unit: string | null): string | null {
   if (!unit) {
     return null;
@@ -43,6 +59,15 @@ function normalizeDisplayUnit(unit: string | null): string | null {
   }
 
   return unit.toLowerCase();
+}
+
+function normalizeDefaultUnit(unit: string | null | undefined) {
+  const value = unit?.trim();
+  if (!value) {
+    return null;
+  }
+
+  return normalizeDisplayUnit(value);
 }
 
 export async function GET(req: NextRequest) {
@@ -211,4 +236,67 @@ export async function GET(req: NextRequest) {
     familyOptions,
     categoryOptions,
   });
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = (await request.json()) as CreateItemRequest;
+    const sku = body.sku?.trim().toUpperCase() ?? '';
+    const itemName = body.itemName?.trim() ?? '';
+    const category = body.category?.trim() ?? '';
+    const defaultUnit = normalizeDefaultUnit(body.defaultUnit);
+
+    if (!sku) {
+      return NextResponse.json({ error: 'SKU is required.' }, { status: 400 });
+    }
+
+    if (!itemName) {
+      return NextResponse.json({ error: 'Item name is required.' }, { status: 400 });
+    }
+
+    if (!VALID_CATEGORIES.has(category)) {
+      return NextResponse.json({ error: 'Category is invalid.' }, { status: 400 });
+    }
+
+    const supabase = getSupabaseServerClient();
+    const { data: duplicateItem, error: duplicateError } = await supabase
+      .from('items')
+      .select('id')
+      .eq('sku', sku)
+      .maybeSingle();
+
+    if (duplicateError) {
+      return NextResponse.json({ error: duplicateError.message }, { status: 500 });
+    }
+
+    if (duplicateItem) {
+      return NextResponse.json({ error: 'That SKU already exists.' }, { status: 400 });
+    }
+
+    const { data: insertedItem, error: insertError } = await supabase
+      .from('items')
+      .insert({
+        sku,
+        item_name: itemName,
+        normalized_name: normalizeItemName(itemName),
+        family: null,
+        category,
+        default_unit: defaultUnit,
+        active: true,
+      })
+      .select('id, sku, item_name, category, default_unit')
+      .single();
+
+    if (insertError) {
+      return NextResponse.json({ error: insertError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      item: insertedItem,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown item create error';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
@@ -24,6 +25,18 @@ type ItemsResponse = {
   categoryOptions: string[];
 };
 
+type CreateItemResponse = {
+  ok?: boolean;
+  error?: string;
+  item?: {
+    id: string;
+    sku: string;
+    item_name: string;
+    category: string | null;
+    default_unit: string | null;
+  };
+};
+
 type SortKey =
   | 'sku'
   | 'item_name'
@@ -41,6 +54,14 @@ const categoryStyles: Record<string, string> = {
   packaging: 'bg-emerald-100 text-emerald-900 border-emerald-200',
   raw_material: 'bg-rose-100 text-rose-900 border-rose-200',
 };
+
+const CREATE_ITEM_CATEGORY_OPTIONS = [
+  'plastic_part',
+  'electronic',
+  'metal_part',
+  'packaging',
+  'raw_material',
+] as const;
 
 function formatCategory(category: string | null) {
   if (!category) {
@@ -128,6 +149,15 @@ export default function ItemsPage() {
   const [category, setCategory] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('item_name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createSku, setCreateSku] = useState('');
+  const [createItemName, setCreateItemName] = useState('');
+  const [createCategory, setCreateCategory] = useState('raw_material');
+  const [createDefaultUnit, setCreateDefaultUnit] = useState('');
+  const [createMessage, setCreateMessage] = useState('');
+  const [createError, setCreateError] = useState('');
+  const [createdItem, setCreatedItem] = useState<CreateItemResponse['item'] | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
 
   function applyItemsResponse(data: ItemsResponse) {
     setItems(Array.isArray(data.items) ? data.items : []);
@@ -222,6 +252,49 @@ export default function ItemsPage() {
     return sortDirection === 'asc' ? result : -result;
   });
 
+  async function handleCreateItem(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsCreating(true);
+    setCreateMessage('');
+    setCreateError('');
+    setCreatedItem(null);
+
+    try {
+      const response = await fetch('/api/items', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sku: createSku,
+          itemName: createItemName,
+          category: createCategory,
+          defaultUnit: createDefaultUnit,
+        }),
+      });
+
+      const result = (await response.json()) as CreateItemResponse;
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create SKU.');
+      }
+
+      setCreatedItem(result.item ?? null);
+      setCreateMessage(
+        result.item
+          ? `Created SKU ${result.item.sku}. It will appear in Inward after receipts are uploaded.`
+          : 'SKU created.'
+      );
+      setCreateSku('');
+      setCreateItemName('');
+      setCreateCategory('raw_material');
+      setCreateDefaultUnit('');
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Failed to create SKU.');
+    } finally {
+      setIsCreating(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-5 sm:p-6">
       <div className="mx-auto max-w-7xl">
@@ -234,6 +307,100 @@ export default function ItemsPage() {
         >
           Filter inwarded SKUs by name, family, and category to review current receipts.
         </p>
+
+        <div className="mb-5 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm md:mb-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-neutral-950">Need a missing SKU?</div>
+              <div className="mt-1 text-sm text-neutral-600">
+                Create it here, then tag family/details later from the item record.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsCreateOpen((current) => !current);
+                setCreateError('');
+                setCreateMessage('');
+                setCreatedItem(null);
+              }}
+              className="rounded-2xl bg-neutral-950 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-800"
+            >
+              {isCreateOpen ? 'Hide create SKU form' : 'Create SKU'}
+            </button>
+          </div>
+
+          {isCreateOpen ? (
+            <form onSubmit={handleCreateItem} className="mt-4 space-y-4">
+              <div className="grid gap-3 lg:grid-cols-[1fr_1.2fr_220px_180px]">
+                <input
+                  type="text"
+                  value={createSku}
+                  onChange={(event) => setCreateSku(event.target.value)}
+                  placeholder="SKU"
+                  className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
+                />
+                <input
+                  type="text"
+                  value={createItemName}
+                  onChange={(event) => setCreateItemName(event.target.value)}
+                  placeholder="Item name"
+                  className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
+                />
+                <select
+                  value={createCategory}
+                  onChange={(event) => setCreateCategory(event.target.value)}
+                  className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
+                >
+                  {CREATE_ITEM_CATEGORY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {formatCategory(option)}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={createDefaultUnit}
+                  onChange={(event) => setCreateDefaultUnit(event.target.value)}
+                  placeholder="Default unit"
+                  className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={isCreating}
+                  className="rounded-2xl bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-200"
+                >
+                  {isCreating ? 'Creating...' : 'Save SKU'}
+                </button>
+                <div className="text-xs text-neutral-500">
+                  New SKUs do not show in this table until they have inward receipts.
+                </div>
+              </div>
+
+              {createMessage ? (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  {createMessage}
+                  {createdItem ? (
+                    <span className="ml-2">
+                      <Link href={`/items/${createdItem.id}`} className="font-semibold underline">
+                        Open item
+                      </Link>
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {createError ? (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {createError}
+                </div>
+              ) : null}
+            </form>
+          ) : null}
+        </div>
 
         <div
           className="mb-5 grid gap-3 md:mb-4 md:grid-cols-[minmax(0,1fr)_220px_220px]"

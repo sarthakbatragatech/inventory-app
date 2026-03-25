@@ -6,6 +6,7 @@ type PageProps = {
   searchParams?: Promise<{
     fgSku?: string;
     q?: string;
+    family?: string;
   }>;
 };
 
@@ -27,10 +28,39 @@ function formatDate(value: string | null) {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
+function deriveModelFamily(fgSku: string, fgName: string | null) {
+  const skuMatch = fgSku.trim().toUpperCase().match(/^([A-Z]{1,3}-\d{2,4})\b/);
+  if (skuMatch) {
+    return skuMatch[1];
+  }
+
+  const nameMatch = (fgName ?? '').trim().toUpperCase().match(/^([A-Z]{1,3}-\d{2,4})\b/);
+  return nameMatch?.[1] ?? '';
+}
+
 export default async function ModelAnalysisPage({ searchParams }: PageProps) {
   const params = (await searchParams) ?? {};
   const models = await listStockModels();
-  const selectedFgSku = params.fgSku?.trim() || models[0]?.fg_sku || '';
+  const selectedFamily = params.family?.trim() || '';
+  const modelsWithFamily = models.map((model) => ({
+    ...model,
+    family: deriveModelFamily(model.fg_sku, model.fg_name),
+  }));
+  const familyOptions = [
+    ...new Set(
+      modelsWithFamily
+        .map((model) => model.family)
+        .filter((family): family is string => Boolean(family))
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+  const filteredModels = selectedFamily
+    ? modelsWithFamily.filter((model) => model.family === selectedFamily)
+    : modelsWithFamily;
+  const hasAnyModels = modelsWithFamily.length > 0;
+  const requestedFgSku = params.fgSku?.trim() || '';
+  const selectedFgSku = filteredModels.some((model) => model.fg_sku === requestedFgSku)
+    ? requestedFgSku
+    : filteredModels[0]?.fg_sku || '';
   const query = params.q?.trim().toLowerCase() || '';
   const snapshot = selectedFgSku ? await getStockSnapshotByFgSku(selectedFgSku) : null;
 
@@ -49,14 +79,16 @@ export default async function ModelAnalysisPage({ searchParams }: PageProps) {
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-5 sm:p-6">
       <div className="mx-auto max-w-7xl">
-        <h1 className="mb-2 text-4xl font-semibold tracking-tight text-neutral-950 sm:text-3xl">
-          Model Analysis
-        </h1>
-        <p className="mb-5 max-w-3xl text-base leading-8 text-neutral-700 sm:mb-6 sm:text-sm sm:leading-6">
-          Analyze a single model&apos;s BOM against inward and all-model consumption.
-        </p>
+        <div className="mb-5 sm:mb-6">
+          <h1 className="mb-2 text-4xl font-semibold tracking-tight text-neutral-950 sm:text-3xl">
+            Model Analysis
+          </h1>
+          <p className="max-w-3xl text-base leading-8 text-neutral-700 sm:text-sm sm:leading-6">
+            Analyze a single model&apos;s BOM against inward and all-model consumption.
+          </p>
+        </div>
 
-        <form className="mb-5 grid gap-3 md:mb-4 md:grid-cols-[minmax(0,1fr)_320px_140px]">
+        <form className="mb-5 grid gap-3 md:mb-4 md:grid-cols-[minmax(0,1fr)_220px_320px_140px_160px]">
           <input
             type="text"
             name="q"
@@ -66,11 +98,24 @@ export default async function ModelAnalysisPage({ searchParams }: PageProps) {
           />
 
           <select
+            name="family"
+            defaultValue={selectedFamily}
+            className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm sm:rounded-xl sm:p-3 sm:text-sm"
+          >
+            <option value="">All Families</option>
+            {familyOptions.map((family) => (
+              <option key={family} value={family}>
+                {family}
+              </option>
+            ))}
+          </select>
+
+          <select
             name="fgSku"
             defaultValue={selectedFgSku}
             className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm sm:rounded-xl sm:p-3 sm:text-sm"
           >
-            {models.map((model) => (
+            {filteredModels.map((model) => (
               <option key={model.id} value={model.fg_sku}>
                 {model.fg_name ? `${model.fg_sku} - ${model.fg_name}` : model.fg_sku}
               </option>
@@ -83,11 +128,26 @@ export default async function ModelAnalysisPage({ searchParams }: PageProps) {
           >
             Apply
           </button>
+
+          <a
+            href={snapshot ? `/bom/print?fgSku=${encodeURIComponent(snapshot.fgSku)}` : '#'}
+            target="_blank"
+            rel="noreferrer"
+            className={`inline-flex items-center justify-center rounded-2xl border px-4 py-4 text-base font-medium transition sm:rounded-xl sm:p-3 sm:text-sm ${
+              snapshot
+                ? 'border-neutral-300 bg-white text-neutral-800 hover:border-neutral-400 hover:bg-neutral-50'
+                : 'pointer-events-none border-neutral-200 bg-neutral-100 text-neutral-400'
+            }`}
+          >
+            Print Preview
+          </a>
         </form>
 
         {!snapshot ? (
           <div className="rounded-3xl border border-dashed border-neutral-300 bg-white px-6 py-10 text-sm text-neutral-500">
-            No BOM models exist yet.
+            {hasAnyModels
+              ? 'No BOM models match the current family filter.'
+              : 'No BOM models exist yet.'}
           </div>
         ) : (
           <>
@@ -273,6 +333,7 @@ export default async function ModelAnalysisPage({ searchParams }: PageProps) {
                 No model-analysis rows match the current filters.
               </div>
             ) : null}
+
           </>
         )}
       </div>
