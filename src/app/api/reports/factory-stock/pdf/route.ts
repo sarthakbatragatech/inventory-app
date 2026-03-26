@@ -7,7 +7,9 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const { pdfBytes, filename } = await generateFactoryStockPdfDocument();
-    const pdfBody = new Blob([pdfBytes], { type: 'application/pdf' });
+    const pdfArrayBuffer = new ArrayBuffer(pdfBytes.byteLength);
+    new Uint8Array(pdfArrayBuffer).set(pdfBytes);
+    const pdfBody = new Blob([pdfArrayBuffer], { type: 'application/pdf' });
 
     return new NextResponse(pdfBody, {
       headers: {
