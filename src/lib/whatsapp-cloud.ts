@@ -42,12 +42,14 @@ async function uploadDocumentMedia(
   input: SendWhatsAppDocumentInput,
   config: ReturnType<typeof getWhatsAppConfig>
 ) {
+  const pdfArrayBuffer = new ArrayBuffer(input.pdfBytes.byteLength);
+  new Uint8Array(pdfArrayBuffer).set(input.pdfBytes);
   const formData = new FormData();
   formData.set('messaging_product', 'whatsapp');
   formData.set('type', 'application/pdf');
   formData.set(
     'file',
-    new Blob([input.pdfBytes], { type: 'application/pdf' }),
+    new Blob([pdfArrayBuffer], { type: 'application/pdf' }),
     input.filename
   );
 
