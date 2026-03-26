@@ -20,13 +20,54 @@ type ReconciliationPageResponse = {
   items: ReconciliationItem[];
   familyOptions: string[];
   categoryOptions: string[];
+  adjustments: ReconciliationAdjustmentItem[];
   error?: string;
+};
+
+type ReconciliationSavedItem = {
+  itemId: string;
+  sku: string;
+  itemName: string;
+};
+
+type ReconciliationAdjustmentItem = {
+  id: string;
+  itemId: string;
+  sku: string;
+  itemName: string;
+  family: string | null;
+  families: string[];
+  category: string | null;
+  default_unit: string | null;
+  adjustmentDate: string;
+  quantityDelta: number;
+  reason: string;
+  referenceModel: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type EditableReconciliationItem = ReconciliationItem & {
   draftPhysicalQty: string;
   draftNotes: string;
 };
+
+type AdjustmentDraft = {
+  itemId: string;
+  quantityDelta: string;
+  reason: string;
+  referenceModel: string;
+  notes: string;
+};
+
+const ADJUSTMENT_REASON_OPTIONS = [
+  { value: 'temporary_substitution', label: 'Temporary substitution' },
+  { value: 'transfer_to_model', label: 'Transfer to model' },
+  { value: 'damage_or_scrap', label: 'Damage / scrap' },
+  { value: 'count_correction', label: 'Count correction' },
+  { value: 'other', label: 'Other' },
+] as const;
 
 function formatCategory(category: string | null) {
   if (!category) {
@@ -48,6 +89,11 @@ function formatQuantity(quantity: number | null, unit: string | null) {
   return unit ? `${rounded} ${unit}` : rounded;
 }
 
+function formatSignedQuantity(quantity: number, unit: string | null) {
+  const formatted = formatQuantity(Math.abs(quantity), unit);
+  return quantity > 0 ? `+${formatted}` : `-${formatted}`;
+}
+
 function getTodayIsoDate() {
   return new Intl.DateTimeFormat('en-CA').format(new Date());
 }
@@ -64,6 +110,40 @@ function normalizeDraftQuantity(value: string) {
   }
 
   return quantity;
+}
+
+function normalizeAdjustmentQuantity(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const quantity = Number(trimmed);
+  if (!Number.isFinite(quantity) || quantity === 0) {
+    return NaN;
+  }
+
+  return quantity;
+}
+
+function formatSavedSkuSummary(items: ReconciliationSavedItem[]) {
+  if (!items.length) {
+    return '';
+  }
+
+  return items.map((item) => item.sku).join(', ');
+}
+
+function formatAdjustmentReason(reason: string) {
+  const option = ADJUSTMENT_REASON_OPTIONS.find((entry) => entry.value === reason);
+  if (option) {
+    return option.label;
+  }
+
+  return reason
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 async function requestReconciliationItems(params: {
@@ -101,12 +181,22 @@ export default function ReconciliationPage() {
   const [family, setFamily] = useState('');
   const [category, setCategory] = useState('');
   const [items, setItems] = useState<EditableReconciliationItem[]>([]);
+  const [adjustments, setAdjustments] = useState<ReconciliationAdjustmentItem[]>([]);
   const [familyOptions, setFamilyOptions] = useState<string[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAdjusting, setIsAdjusting] = useState(false);
+  const [deletingAdjustmentId, setDeletingAdjustmentId] = useState<string | null>(null);
+  const [adjustmentDraft, setAdjustmentDraft] = useState<AdjustmentDraft>({
+    itemId: '',
+    quantityDelta: '',
+    reason: ADJUSTMENT_REASON_OPTIONS[0].value,
+    referenceModel: '',
+    notes: '',
+  });
 
   async function loadItems(nextParams?: {
     date?: string;
@@ -133,10 +223,12 @@ export default function ReconciliationPage() {
           draftNotes: item.notes ?? '',
         }))
       );
+      setAdjustments(Array.isArray(result.adjustments) ? result.adjustments : []);
       setFamilyOptions(result.familyOptions);
       setCategoryOptions(result.categoryOptions);
     } catch (fetchError: unknown) {
       setItems([]);
+      setAdjustments([]);
       setError(
         fetchError instanceof Error
           ? fetchError.message
@@ -172,6 +264,17 @@ export default function ReconciliationPage() {
     [items]
   );
 
+  const selectableItems = useMemo(
+    () =>
+      [...items]
+        .sort((left, right) => left.item_name.localeCompare(right.item_name))
+        .map((item) => ({
+          id: item.id,
+          label: `${item.sku} · ${item.item_name}`,
+        })),
+    [items]
+  );
+
   function updateItemDraft(
     itemId: string,
     field: 'draftPhysicalQty' | 'draftNotes',
@@ -180,6 +283,16 @@ export default function ReconciliationPage() {
     setItems((current) =>
       current.map((item) => (item.id === itemId ? { ...item, [field]: value } : item))
     );
+  }
+
+  function updateAdjustmentDraft<K extends keyof AdjustmentDraft>(
+    field: K,
+    value: AdjustmentDraft[K]
+  ) {
+    setAdjustmentDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
   }
 
   async function saveChanges() {
@@ -220,6 +333,8 @@ export default function ReconciliationPage() {
         ok?: boolean;
         savedCount?: number;
         clearedCount?: number;
+        savedItems?: ReconciliationSavedItem[];
+        clearedItems?: ReconciliationSavedItem[];
         error?: string;
       };
 
@@ -227,10 +342,21 @@ export default function ReconciliationPage() {
         throw new Error(result.error || 'Failed to save reconciliation.');
       }
 
+      const savedItems = Array.isArray(result.savedItems) ? result.savedItems : [];
+      const clearedItems = Array.isArray(result.clearedItems) ? result.clearedItems : [];
+      const savedSummary = formatSavedSkuSummary(savedItems);
+      const clearedSummary = formatSavedSkuSummary(clearedItems);
+
       setStatus(
         `Saved ${result.savedCount ?? 0} reconciliation count${
           (result.savedCount ?? 0) === 1 ? '' : 's'
-        } for ${selectedDate}.${(result.clearedCount ?? 0) > 0 ? ` Cleared ${result.clearedCount} entr${(result.clearedCount ?? 0) === 1 ? 'y' : 'ies'}.` : ''}`
+        } for ${selectedDate}.${savedSummary ? ` SKUs: ${savedSummary}.` : ''}${
+          (result.clearedCount ?? 0) > 0
+            ? ` Cleared ${result.clearedCount} entr${
+                (result.clearedCount ?? 0) === 1 ? 'y' : 'ies'
+              }.${clearedSummary ? ` Cleared SKUs: ${clearedSummary}.` : ''}`
+            : ''
+        }`
       );
       await loadItems();
     } catch (saveError: unknown) {
@@ -239,6 +365,107 @@ export default function ReconciliationPage() {
       );
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function createAdjustment() {
+    const quantityDelta = normalizeAdjustmentQuantity(adjustmentDraft.quantityDelta);
+
+    if (!adjustmentDraft.itemId) {
+      setError('Select a SKU for the manual adjustment.');
+      setStatus('');
+      return;
+    }
+
+    if (quantityDelta === null || Number.isNaN(quantityDelta)) {
+      setError('Adjustment quantity must be a non-zero number.');
+      setStatus('');
+      return;
+    }
+
+    setIsAdjusting(true);
+    setError('');
+    setStatus('');
+
+    try {
+      const response = await fetch('/api/reconciliation/adjustments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          date: selectedDate,
+          itemId: adjustmentDraft.itemId,
+          quantityDelta,
+          reason: adjustmentDraft.reason,
+          referenceModel: adjustmentDraft.referenceModel.trim() || null,
+          notes: adjustmentDraft.notes.trim() || null,
+        }),
+      });
+
+      const result = (await response.json()) as {
+        ok?: boolean;
+        item?: ReconciliationSavedItem;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to save stock adjustment.');
+      }
+
+      setAdjustmentDraft((current) => ({
+        ...current,
+        quantityDelta: '',
+        referenceModel: '',
+        notes: '',
+      }));
+      setStatus(
+        `Saved manual adjustment for ${result.item?.sku || 'the selected SKU'} on ${selectedDate}.`
+      );
+      await loadItems();
+    } catch (saveError: unknown) {
+      setError(
+        saveError instanceof Error ? saveError.message : 'Failed to save stock adjustment.'
+      );
+    } finally {
+      setIsAdjusting(false);
+    }
+  }
+
+  async function deleteAdjustment(adjustmentId: string) {
+    const confirmed = window.confirm('Delete this manual stock adjustment?');
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingAdjustmentId(adjustmentId);
+    setError('');
+    setStatus('');
+
+    try {
+      const response = await fetch(`/api/reconciliation/adjustments/${adjustmentId}`, {
+        method: 'DELETE',
+      });
+      const result = (await response.json()) as {
+        ok?: boolean;
+        item?: ReconciliationSavedItem | null;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete stock adjustment.');
+      }
+
+      setStatus(
+        `Deleted manual adjustment for ${result.item?.sku || 'the selected SKU'} on ${selectedDate}.`
+      );
+      await loadItems();
+    } catch (deleteError: unknown) {
+      setError(
+        deleteError instanceof Error ? deleteError.message : 'Failed to delete stock adjustment.'
+      );
+    } finally {
+      setDeletingAdjustmentId(null);
     }
   }
 
@@ -309,6 +536,129 @@ export default function ReconciliationPage() {
           System balance is shown only as a reference. The saved physical count for{' '}
           <span className="font-mono">{selectedDate}</span> will stay fixed even if later
           dispatch data changes the calculated balance for that day.
+        </div>
+
+        <div className="mb-4 rounded-3xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-neutral-950">Manual Adjustments</h2>
+              <p className="mt-1 text-sm text-neutral-600">
+                Use negative quantities to reduce stock and positive quantities to add stock.
+                Adjustments are dated to the selected reconciliation day and become part of the
+                live stock balance.
+              </p>
+              <p className="mt-1 text-xs text-neutral-500">
+                Item options follow the current search and filter selection.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,2fr)_180px_220px_180px_minmax(0,2fr)_auto]">
+            <select
+              value={adjustmentDraft.itemId}
+              onChange={(event) => updateAdjustmentDraft('itemId', event.target.value)}
+              className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950 shadow-sm"
+            >
+              <option value="">Select SKU</option>
+              {selectableItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              step="0.0001"
+              value={adjustmentDraft.quantityDelta}
+              onChange={(event) => updateAdjustmentDraft('quantityDelta', event.target.value)}
+              placeholder="-12 or 8"
+              className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950 shadow-sm"
+            />
+            <select
+              value={adjustmentDraft.reason}
+              onChange={(event) => updateAdjustmentDraft('reason', event.target.value)}
+              className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950 shadow-sm"
+            >
+              {ADJUSTMENT_REASON_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={adjustmentDraft.referenceModel}
+              onChange={(event) => updateAdjustmentDraft('referenceModel', event.target.value)}
+              placeholder="Reference model"
+              className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950 shadow-sm"
+            />
+            <input
+              type="text"
+              value={adjustmentDraft.notes}
+              onChange={(event) => updateAdjustmentDraft('notes', event.target.value)}
+              placeholder="Notes"
+              className="rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-950 shadow-sm"
+            />
+            <button
+              type="button"
+              onClick={() => void createAdjustment()}
+              disabled={isAdjusting || isLoading}
+              className="rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+            >
+              {isAdjusting ? 'Saving...' : 'Add Adjustment'}
+            </button>
+          </div>
+
+          <div className="mt-4 text-sm text-neutral-600">
+            {adjustments.length
+              ? `${adjustments.length} adjustment${adjustments.length === 1 ? '' : 's'} saved for ${selectedDate}.`
+              : `No manual adjustments saved for ${selectedDate}.`}
+          </div>
+
+          {adjustments.length ? (
+            <div className="mt-4 space-y-3">
+              {adjustments.map((adjustment) => (
+                <div
+                  key={adjustment.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 md:flex-row md:items-start md:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="font-semibold text-neutral-950">{adjustment.sku}</span>
+                      <span className="text-neutral-500">{adjustment.itemName}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          adjustment.quantityDelta > 0
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-rose-100 text-rose-800'
+                        }`}
+                      >
+                        {formatSignedQuantity(
+                          adjustment.quantityDelta,
+                          adjustment.default_unit
+                        )}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm text-neutral-600">
+                      {formatAdjustmentReason(adjustment.reason)}
+                      {adjustment.referenceModel ? ` · ${adjustment.referenceModel}` : ''}
+                    </div>
+                    {adjustment.notes ? (
+                      <div className="mt-1 text-sm text-neutral-600">{adjustment.notes}</div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void deleteAdjustment(adjustment.id)}
+                    disabled={deletingAdjustmentId === adjustment.id}
+                    className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-neutral-400 hover:text-neutral-950 disabled:cursor-not-allowed disabled:text-neutral-400"
+                  >
+                    {deletingAdjustmentId === adjustment.id ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {status ? (

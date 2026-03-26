@@ -19,17 +19,12 @@ const homeLinks = [
   {
     href: '/stock',
     title: 'Stock',
-    description: 'Review inventory-wide inward, sales consumption, and current balance.',
+    description: 'Review inventory, model-scoped BOM pressure, print preview, and current balance.',
   },
   {
     href: '/reconciliation',
     title: 'Reconciliation',
     description: 'Capture end-of-day physical stock counts that stay fixed for that date.',
-  },
-  {
-    href: '/model-analysis',
-    title: 'Model analysis',
-    description: "Drill into a single model's BOM-based component usage.",
   },
 ] as const;
 

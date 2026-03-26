@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 interface Item {
@@ -141,6 +141,7 @@ async function requestItems(
 }
 
 export default function ItemsPage() {
+  const itemsRequestIdRef = useRef(0);
   const [items, setItems] = useState<Item[]>([]);
   const [familyOptions, setFamilyOptions] = useState<string[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
@@ -167,43 +168,36 @@ export default function ItemsPage() {
     );
   }
 
-  async function fetchItems(
+  const fetchItems = useCallback(async (
     q = '',
     selectedFamily = '',
     selectedCategory = ''
-  ) {
+  ) => {
+    const requestId = itemsRequestIdRef.current + 1;
+    itemsRequestIdRef.current = requestId;
+
     try {
       const data = await requestItems(q, selectedFamily, selectedCategory);
+      if (requestId !== itemsRequestIdRef.current) {
+        return;
+      }
       applyItemsResponse(data);
     } catch (error) {
+      if (requestId !== itemsRequestIdRef.current) {
+        return;
+      }
       console.error('Error fetching items:', error);
       setItems([]);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      void fetchItems(search, family, category);
+    }, search.trim() ? 180 : 0);
 
-    async function loadInitialItems() {
-      try {
-        const data = await requestItems();
-        if (!cancelled) {
-          applyItemsResponse(data);
-        }
-      } catch (error) {
-        console.error('Error fetching items:', error);
-        if (!cancelled) {
-          setItems([]);
-        }
-      }
-    }
-
-    void loadInitialItems();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => window.clearTimeout(timeoutId);
+  }, [category, family, fetchItems, search]);
 
   function toggleSort(nextKey: SortKey) {
     if (sortKey === nextKey) {
@@ -410,21 +404,13 @@ export default function ItemsPage() {
             type="text"
             placeholder="Search SKU / Name"
             value={search}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSearch(value);
-              void fetchItems(value, family, category);
-            }}
+            onChange={(e) => setSearch(e.target.value)}
             className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm placeholder:text-neutral-400 sm:rounded-xl sm:p-3 sm:text-sm"
           />
 
           <select
             value={family}
-            onChange={(e) => {
-              const value = e.target.value;
-              setFamily(value);
-              void fetchItems(search, value, category);
-            }}
+            onChange={(e) => setFamily(e.target.value)}
             className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm sm:rounded-xl sm:p-3 sm:text-sm"
             suppressHydrationWarning
           >
@@ -438,11 +424,7 @@ export default function ItemsPage() {
 
           <select
             value={category}
-            onChange={(e) => {
-              const value = e.target.value;
-              setCategory(value);
-              void fetchItems(search, family, value);
-            }}
+            onChange={(e) => setCategory(e.target.value)}
             className="rounded-2xl border border-neutral-300 bg-white px-4 py-4 text-base text-neutral-950 shadow-sm sm:rounded-xl sm:p-3 sm:text-sm"
             suppressHydrationWarning
           >
@@ -457,7 +439,7 @@ export default function ItemsPage() {
 
         <div className="space-y-4 md:hidden">
           {sortedItems.map((item) => (
-            <a
+            <Link
               key={item.id}
               href={`/items/${item.id}`}
               className="block rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:shadow-md"
@@ -515,7 +497,7 @@ export default function ItemsPage() {
                   </div>
                 </div>
               </div>
-            </a>
+            </Link>
           ))}
         </div>
 
@@ -560,12 +542,12 @@ export default function ItemsPage() {
               {sortedItems.map((item) => (
                 <tr key={item.id} className="border-t border-neutral-200 transition hover:bg-sky-50/70">
                   <td className="px-4 py-3 font-medium text-neutral-700">
-                    <a
+                    <Link
                       href={`/items/${item.id}`}
                       className="font-semibold text-sky-700 underline decoration-sky-300 underline-offset-4 transition hover:text-sky-800 hover:decoration-sky-600"
                     >
                       {item.sku}
-                    </a>
+                    </Link>
                   </td>
                   <td className="px-4 py-3">{item.item_name}</td>
                   <td className="px-4 py-3">{renderFamilySummary(item.family, item.families)}</td>

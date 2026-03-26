@@ -1,6 +1,12 @@
 'use client';
 
-export function PrintPreviewActions() {
+type PrintPreviewActionsProps = {
+  description?: string;
+};
+
+export function PrintPreviewActions({
+  description = "Use Print to open the browser's print preview for this BOM.",
+}: PrintPreviewActionsProps) {
   return (
     <div className="mb-6 flex flex-wrap gap-3 print:hidden">
       <button
@@ -18,7 +24,7 @@ export function PrintPreviewActions() {
         Close
       </button>
       <div className="self-center text-xs text-neutral-500">
-        Use Print to open the browser&apos;s print preview for this BOM.
+        {description}
       </div>
     </div>
   );

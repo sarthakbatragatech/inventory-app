@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStockListItems } from '@/lib/stock';
+import { filterStockListItems, getStockListItems } from '@/lib/stock';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -26,23 +26,10 @@ export async function GET(req: NextRequest) {
       ),
     ].sort((left, right) => left.localeCompare(right));
 
-    const filteredItems = items.filter((item) => {
-      if (q) {
-        const haystack = `${item.sku} ${item.item_name}`.toLowerCase();
-        if (!haystack.includes(q)) {
-          return false;
-        }
-      }
-
-      if (familyFilter && !item.families.includes(familyFilter)) {
-        return false;
-      }
-
-      if (categoryFilter && item.category !== categoryFilter) {
-        return false;
-      }
-
-      return true;
+    const filteredItems = filterStockListItems(items, {
+      q,
+      family: familyFilter,
+      category: categoryFilter,
     });
 
     return NextResponse.json({

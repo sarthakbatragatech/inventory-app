@@ -65,12 +65,6 @@ export default function RootLayout({
                 Reconciliation
               </Link>
               <Link
-                href="/model-analysis"
-                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-rose-100 hover:text-rose-950"
-              >
-                Model Analysis
-              </Link>
-              <Link
                 href="/items"
                 className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-violet-100 hover:text-violet-950"
               >

@@ -18,6 +18,7 @@ export type StockComponentRow = {
 export type StockModelSnapshot = {
   fgSku: string;
   fgName: string | null;
+  isAggregate: boolean;
   salesQty: number;
   salesDateFrom: string | null;
   salesDateTo: string | null;
@@ -40,6 +41,12 @@ export type StockListItem = {
   lastInward: string | null;
   lastInwardQty: number | null;
   lastInwardUnit: string | null;
+};
+
+export type StockListFilters = {
+  q?: string;
+  family?: string;
+  category?: string;
 };
 
 type SalesRow = {
@@ -72,6 +79,26 @@ type ItemRecord = {
   default_unit: string | null;
   created_at: string;
   active: boolean;
+};
+
+type ComponentUsage = {
+  componentItemId: string;
+  componentSku: string;
+  componentName: string;
+  unit: string | null;
+  consumedQty: number;
+};
+
+type ReconciliationRow = {
+  item_id: string;
+  count_date: string;
+  physical_qty: number;
+};
+
+type StockAdjustmentRow = {
+  item_id: string;
+  adjustment_date: string;
+  quantity_delta: number;
 };
 
 function normalizeDisplayUnit(unit: string | null) {
@@ -132,6 +159,63 @@ function getMonthSpanInclusive(startDate: string | null, endDate: string | null)
   return Math.max(months, 1);
 }
 
+async function loadLatestReconciliationByItemIds(
+  supabase: ReturnType<typeof getSupabaseInventoryServerClient>,
+  itemIds: string[]
+) {
+  if (!itemIds.length) {
+    return new Map<string, ReconciliationRow>();
+  }
+
+  const { data: reconciliations, error: reconciliationError } = await supabase
+    .from('stock_reconciliations')
+    .select('item_id, count_date, physical_qty')
+    .in('item_id', itemIds)
+    .order('count_date', { ascending: false });
+
+  if (reconciliationError) {
+    throw new Error(`Failed to load stock reconciliations: ${reconciliationError.message}`);
+  }
+
+  return ((reconciliations ?? []) as ReconciliationRow[]).reduce((map, row) => {
+    if (!map.has(row.item_id)) {
+      map.set(row.item_id, row);
+    }
+
+    return map;
+  }, new Map<string, ReconciliationRow>());
+}
+
+async function loadStockAdjustmentsByItemIds(
+  supabase: ReturnType<typeof getSupabaseInventoryServerClient>,
+  itemIds: string[]
+) {
+  if (!itemIds.length) {
+    return new Map<string, StockAdjustmentRow[]>();
+  }
+
+  const { data: adjustments, error: adjustmentError } = await supabase
+    .from('stock_adjustments')
+    .select('item_id, adjustment_date, quantity_delta')
+    .in('item_id', itemIds)
+    .order('adjustment_date', { ascending: true });
+
+  if (
+    adjustmentError &&
+    !['PGRST205', '42P01'].includes(adjustmentError.code || '') &&
+    !adjustmentError.message.includes('does not exist')
+  ) {
+    throw new Error(`Failed to load stock adjustments: ${adjustmentError.message}`);
+  }
+
+  return ((adjustments ?? []) as StockAdjustmentRow[]).reduce((map, row) => {
+    const existing = map.get(row.item_id) ?? [];
+    existing.push(row);
+    map.set(row.item_id, existing);
+    return map;
+  }, new Map<string, StockAdjustmentRow[]>());
+}
+
 export async function listStockModels() {
   return listBomModels();
 }
@@ -172,6 +256,7 @@ async function loadComponentConsumption() {
       consumedQty: number;
     }
   >();
+  const globalComponentUsageByDate = new Map<string, Map<string, number>>();
 
   const selectedComponentUsageByFgSku = new Map<
     string,
@@ -210,6 +295,10 @@ async function loadComponentConsumption() {
         globalExisting.consumedQty += qtyToAdd;
         globalComponentUsage.set(line.component_item_id, globalExisting);
 
+        const usageByDate = globalComponentUsageByDate.get(line.component_item_id) ?? new Map();
+        usageByDate.set(saleRow.sale_date, (usageByDate.get(saleRow.sale_date) ?? 0) + qtyToAdd);
+        globalComponentUsageByDate.set(line.component_item_id, usageByDate);
+
         const selectedMap =
           selectedComponentUsageByFgSku.get(modelDetail.model.fg_sku) ?? new Map();
         const selectedExisting = selectedMap.get(line.component_item_id) ?? {
@@ -235,6 +324,7 @@ async function loadComponentConsumption() {
     bomDetails,
     salesByFgSku,
     globalComponentUsage,
+    globalComponentUsageByDate,
     selectedComponentUsageByFgSku,
     globalSalesDateFrom,
     globalSalesDateTo,
@@ -242,10 +332,148 @@ async function loadComponentConsumption() {
   };
 }
 
+function calculateBalancedQtyFromLatestReconciliation(input: {
+  inwardRows: InwardRow[];
+  totalConsumedQty: number;
+  consumedByDate: Map<string, number> | undefined;
+  adjustmentRows: StockAdjustmentRow[];
+  latestReconciliation: ReconciliationRow | undefined;
+}) {
+  const latestReconciliation = input.latestReconciliation;
+  const totalAdjustmentQty = input.adjustmentRows.reduce(
+    (sum, row) => sum + Number(row.quantity_delta ?? 0),
+    0
+  );
+
+  if (!latestReconciliation) {
+    return (
+      input.inwardRows.reduce((sum, row) => sum + Number(row.quantity ?? 0), 0) +
+      totalAdjustmentQty -
+      input.totalConsumedQty
+    );
+  }
+
+  const inwardAfterCountQty = input.inwardRows.reduce((sum, row) => {
+    if (!row.inward_date || row.inward_date <= latestReconciliation.count_date) {
+      return sum;
+    }
+
+    return sum + Number(row.quantity ?? 0);
+  }, 0);
+
+  const consumedAfterCountQty = [...(input.consumedByDate?.entries() ?? [])].reduce(
+    (sum, [saleDate, qty]) => (saleDate > latestReconciliation.count_date ? sum + qty : sum),
+    0
+  );
+
+  const adjustmentsAfterCountQty = input.adjustmentRows.reduce((sum, row) => {
+    if (row.adjustment_date <= latestReconciliation.count_date) {
+      return sum;
+    }
+
+    return sum + Number(row.quantity_delta ?? 0);
+  }, 0);
+
+  return (
+    latestReconciliation.physical_qty +
+    inwardAfterCountQty +
+    adjustmentsAfterCountQty -
+    consumedAfterCountQty
+  );
+}
+
+async function buildStockSnapshot(input: {
+  fgSku: string;
+  fgName: string | null;
+  isAggregate: boolean;
+  selectedComponentUsage: Map<string, ComponentUsage>;
+  selectedSalesRows: Array<{ sale_date: string; qty: number }>;
+  globalComponentUsage: Map<string, ComponentUsage>;
+  globalComponentUsageByDate: Map<string, Map<string, number>>;
+  monthSpan: number;
+}) {
+  const supabase = getSupabaseInventoryServerClient();
+  const componentItemIds = [...input.selectedComponentUsage.keys()];
+  const inwardTotals = new Map<string, number>();
+  const inwardRowsByItemId = new Map<string, InwardRow[]>();
+  const [latestReconciliationByItemId, stockAdjustmentsByItemId] = await Promise.all([
+    loadLatestReconciliationByItemIds(supabase, componentItemIds),
+    loadStockAdjustmentsByItemIds(supabase, componentItemIds),
+  ]);
+
+  if (componentItemIds.length > 0) {
+    const { data: inwardRows, error: inwardError } = await supabase
+      .from('import_batch_rows')
+      .select('item_id, quantity, inward_date')
+      .in('item_id', componentItemIds);
+
+    if (inwardError) {
+      throw new Error(`Failed to load component inward rows: ${inwardError.message}`);
+    }
+
+    for (const row of (inwardRows ?? []) as InwardRow[]) {
+      const existing = inwardTotals.get(row.item_id) ?? 0;
+      inwardTotals.set(row.item_id, existing + Number(row.quantity ?? 0));
+      const existingRows = inwardRowsByItemId.get(row.item_id) ?? [];
+      existingRows.push(row);
+      inwardRowsByItemId.set(row.item_id, existingRows);
+    }
+  }
+
+  const components: StockComponentRow[] = [...input.selectedComponentUsage.values()]
+    .map((component) => {
+      const inwardQty = inwardTotals.get(component.componentItemId) ?? 0;
+      const selectedModelConsumedQty = component.consumedQty;
+      const consumedQty =
+        input.globalComponentUsage.get(component.componentItemId)?.consumedQty ?? 0;
+      const reorderThresholdQty = consumedQty / input.monthSpan;
+      const balanceQty = calculateBalancedQtyFromLatestReconciliation({
+        inwardRows: inwardRowsByItemId.get(component.componentItemId) ?? [],
+        totalConsumedQty: consumedQty,
+        consumedByDate: input.globalComponentUsageByDate.get(component.componentItemId),
+        adjustmentRows: stockAdjustmentsByItemId.get(component.componentItemId) ?? [],
+        latestReconciliation: latestReconciliationByItemId.get(component.componentItemId),
+      });
+
+      return {
+        componentItemId: component.componentItemId,
+        componentSku: component.componentSku,
+        componentName: component.componentName,
+        unit: component.unit,
+        inwardQty,
+        selectedModelConsumedQty,
+        consumedQty,
+        reorderThresholdQty,
+        balanceQty,
+      };
+    })
+    .sort((left, right) => {
+      if (left.balanceQty !== right.balanceQty) {
+        return left.balanceQty - right.balanceQty;
+      }
+
+      return left.componentSku.localeCompare(right.componentSku);
+    });
+
+  const sortedSalesRows = [...input.selectedSalesRows].sort((left, right) =>
+    left.sale_date.localeCompare(right.sale_date)
+  );
+
+  return {
+    fgSku: input.fgSku,
+    fgName: input.fgName,
+    isAggregate: input.isAggregate,
+    salesQty: sortedSalesRows.reduce((sum, row) => sum + row.qty, 0),
+    salesDateFrom: sortedSalesRows[0]?.sale_date ?? null,
+    salesDateTo: sortedSalesRows[sortedSalesRows.length - 1]?.sale_date ?? null,
+    components,
+  } satisfies StockModelSnapshot;
+}
+
 export async function getStockListItems() {
   const supabase = getSupabaseInventoryServerClient();
   const [
-    { globalComponentUsage, monthSpan },
+    { globalComponentUsage, globalComponentUsageByDate, monthSpan },
     { data: batches, error: batchError },
     { data: items, error: itemError },
   ] = await Promise.all([
@@ -285,6 +513,10 @@ export async function getStockListItems() {
 
   const inwardRows: InwardRow[] = [];
   const itemIds = [...allItemIds];
+  const [latestReconciliationByItemId, stockAdjustmentsByItemId] = await Promise.all([
+    loadLatestReconciliationByItemIds(supabase, itemIds),
+    loadStockAdjustmentsByItemIds(supabase, itemIds),
+  ]);
 
   for (let index = 0; index < latestBatchIds.length; index += 100) {
     const batchChunk = latestBatchIds.slice(index, index + 100);
@@ -337,6 +569,13 @@ export async function getStockListItems() {
       const reorderThresholdQty = (consumed?.consumedQty ?? 0) / monthSpan;
       const sku = item?.sku || consumed?.componentSku || '';
       const itemName = item?.item_name || consumed?.componentName || '';
+      const balanceQty = calculateBalancedQtyFromLatestReconciliation({
+        inwardRows: rows,
+        totalConsumedQty: consumed?.consumedQty ?? 0,
+        consumedByDate: globalComponentUsageByDate.get(itemId),
+        adjustmentRows: stockAdjustmentsByItemId.get(itemId) ?? [],
+        latestReconciliation: latestReconciliationByItemId.get(itemId),
+      });
 
       return {
         id: itemId,
@@ -352,7 +591,7 @@ export async function getStockListItems() {
         inwardQty,
         consumedQty: consumed?.consumedQty ?? 0,
         reorderThresholdQty,
-        balanceQty: inwardQty - (consumed?.consumedQty ?? 0),
+        balanceQty,
         lastInward: lastInward?.inward_date ?? null,
         lastInwardQty: lastInward?.quantity ?? null,
         lastInwardUnit: normalizeDisplayUnit(lastInward?.unit ?? null),
@@ -382,78 +621,125 @@ export async function getStockListItems() {
   }) satisfies StockListItem[];
 }
 
+export function filterStockListItems(items: StockListItem[], filters: StockListFilters = {}) {
+  const q = filters.q?.trim().toLowerCase() || '';
+  const familyFilter = filters.family?.trim() || '';
+  const categoryFilter = filters.category?.trim() || '';
+
+  return items.filter((item) => {
+    if (q) {
+      const haystack = `${item.sku} ${item.item_name}`.toLowerCase();
+      if (!haystack.includes(q)) {
+        return false;
+      }
+    }
+
+    if (familyFilter && !item.families.includes(familyFilter)) {
+      return false;
+    }
+
+    if (categoryFilter && item.category !== categoryFilter) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 export async function getStockSnapshotByFgSku(fgSku: string) {
   const detail = await getBomDetailBySku(fgSku);
   if (!detail) {
     return null;
   }
 
-  const supabase = getSupabaseInventoryServerClient();
   const {
     salesByFgSku,
     globalComponentUsage,
+    globalComponentUsageByDate,
     selectedComponentUsageByFgSku,
     monthSpan,
   } = await loadComponentConsumption();
 
   const selectedComponentUsage =
     selectedComponentUsageByFgSku.get(detail.model.fg_sku) ?? new Map();
-  const componentItemIds = [...selectedComponentUsage.keys()];
-  const inwardTotals = new Map<string, number>();
+  const selectedModelSalesRows = salesByFgSku.get(detail.model.fg_sku) ?? [];
+  return buildStockSnapshot({
+    fgSku: detail.model.fg_sku,
+    fgName: detail.model.fg_name,
+    isAggregate: false,
+    selectedComponentUsage,
+    selectedSalesRows: selectedModelSalesRows,
+    globalComponentUsage,
+    globalComponentUsageByDate,
+    monthSpan,
+  });
+}
 
-  if (componentItemIds.length > 0) {
-    const { data: inwardRows, error: inwardError } = await supabase
-      .from('import_batch_rows')
-      .select('item_id, quantity')
-      .in('item_id', componentItemIds);
+export async function getStockSnapshotByFgSkus(
+  fgSkus: string[],
+  options?: {
+    fgSkuLabel?: string;
+    fgNameLabel?: string | null;
+  }
+) {
+  const normalizedFgSkus = [...new Set(fgSkus.map((value) => value.trim().toUpperCase()))].filter(
+    Boolean
+  );
 
-    if (inwardError) {
-      throw new Error(`Failed to load component inward rows: ${inwardError.message}`);
-    }
-
-    for (const row of (inwardRows ?? []) as InwardRow[]) {
-      const existing = inwardTotals.get(row.item_id) ?? 0;
-      inwardTotals.set(row.item_id, existing + Number(row.quantity ?? 0));
-    }
+  if (normalizedFgSkus.length === 0) {
+    return null;
   }
 
-  const selectedModelSalesRows = salesByFgSku.get(detail.model.fg_sku) ?? [];
+  if (normalizedFgSkus.length === 1) {
+    return getStockSnapshotByFgSku(normalizedFgSkus[0]);
+  }
 
-  const components: StockComponentRow[] = [...selectedComponentUsage.values()]
-    .map((component) => {
-      const inwardQty = inwardTotals.get(component.componentItemId) ?? 0;
-      const selectedModelConsumedQty = component.consumedQty;
-      const consumedQty =
-        globalComponentUsage.get(component.componentItemId)?.consumedQty ?? 0;
-      const reorderThresholdQty = consumedQty / monthSpan;
+  const {
+    bomDetails,
+    salesByFgSku,
+    globalComponentUsage,
+    globalComponentUsageByDate,
+    selectedComponentUsageByFgSku,
+    monthSpan,
+  } = await loadComponentConsumption();
 
-      return {
+  const selectedFgSkuSet = new Set(normalizedFgSkus);
+  const selectedDetails = bomDetails.filter((detail) => selectedFgSkuSet.has(detail.model.fg_sku));
+
+  if (!selectedDetails.length) {
+    return null;
+  }
+
+  const selectedComponentUsage = new Map<string, ComponentUsage>();
+  const selectedSalesRows: Array<{ sale_date: string; qty: number }> = [];
+
+  for (const detail of selectedDetails) {
+    const usage = selectedComponentUsageByFgSku.get(detail.model.fg_sku) ?? new Map();
+    const salesRows = salesByFgSku.get(detail.model.fg_sku) ?? [];
+    selectedSalesRows.push(...salesRows);
+
+    for (const component of usage.values()) {
+      const existing = selectedComponentUsage.get(component.componentItemId) ?? {
         componentItemId: component.componentItemId,
         componentSku: component.componentSku,
         componentName: component.componentName,
         unit: component.unit,
-        inwardQty,
-        selectedModelConsumedQty,
-        consumedQty,
-        reorderThresholdQty,
-        balanceQty: inwardQty - consumedQty,
+        consumedQty: 0,
       };
-    })
-    .sort((left, right) => {
-      if (left.balanceQty !== right.balanceQty) {
-        return left.balanceQty - right.balanceQty;
-      }
 
-      return left.componentSku.localeCompare(right.componentSku);
-    });
+      existing.consumedQty += component.consumedQty;
+      selectedComponentUsage.set(component.componentItemId, existing);
+    }
+  }
 
-  return {
-    fgSku: detail.model.fg_sku,
-    fgName: detail.model.fg_name,
-    salesQty: selectedModelSalesRows.reduce((sum, row) => sum + row.qty, 0),
-    salesDateFrom: selectedModelSalesRows[0]?.sale_date ?? null,
-    salesDateTo:
-      selectedModelSalesRows[selectedModelSalesRows.length - 1]?.sale_date ?? null,
-    components,
-  } satisfies StockModelSnapshot;
+  return buildStockSnapshot({
+    fgSku: options?.fgSkuLabel ?? 'ALL MODELS',
+    fgName: options?.fgNameLabel ?? 'All Models',
+    isAggregate: true,
+    selectedComponentUsage,
+    selectedSalesRows,
+    globalComponentUsage,
+    globalComponentUsageByDate,
+    monthSpan,
+  });
 }
