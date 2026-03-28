@@ -12,6 +12,39 @@ export type ParsedInwardRow = {
   rawPayload: Record<string, unknown>;
 };
 
+const ITEM_NAME_KEYS = ['Item Name', 'Item Description', 'item_name', 'Item', 'Description'];
+const PCS_KEYS = ['Pcs', 'PCS', 'Pieces', 'Piece', 'Nos', 'Nos.'];
+const KG_KEYS = ['Kgs', 'KGs', 'Kg', 'KG', 'kgs', 'kg'];
+const GENERIC_QTY_KEYS = ['Qty', 'Quantity', 'qty', 'quantity'];
+const UNIT_KEYS = ['Unit', 'unit'];
+const DATE_KEYS = ['Date', 'Inward Date', 'date', 'inward_date'];
+const COLOR_KEYS = ['Color', 'Colour', 'Color/type', 'Colour/type'];
+
+function normalizeHeaderKey(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function getRowValue(
+  row: Record<string, unknown>,
+  candidates: string[]
+): unknown {
+  for (const candidate of candidates) {
+    if (candidate in row) {
+      return row[candidate];
+    }
+  }
+
+  const normalizedCandidates = new Set(candidates.map(normalizeHeaderKey));
+
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizedCandidates.has(normalizeHeaderKey(key))) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 function formatDateParts(year: number, month: number, day: number): string {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
@@ -76,10 +109,9 @@ function parseQuantity(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function parseInwardWorkbook(buffer: Buffer): ParsedInwardRow[] {
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
-  const firstSheet = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[firstSheet];
+function parseWorksheet(
+  worksheet: XLSX.WorkSheet
+): ParsedInwardRow[] {
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
     defval: null,
     raw: true,
@@ -87,40 +119,24 @@ export function parseInwardWorkbook(buffer: Buffer): ParsedInwardRow[] {
 
   return rows
     .map((row, index) => {
-      const rawItemName = String(
-        row['Item Name'] ??
-          row['Item Description'] ??
-          row['item_name'] ??
-          row['Item'] ??
-          row['Description'] ??
-          ''
-      ).trim();
+      const rawItemName = String(getRowValue(row, ITEM_NAME_KEYS) ?? '').trim();
 
-      const pcsQuantity = parseQuantity(row['Pcs']);
-      const kgQuantity = parseQuantity(row['Kgs']);
-      const genericQuantity = parseQuantity(
-        row['Qty'] ?? row['Quantity'] ?? row['qty'] ?? null
-      );
+      const pcsQuantity = parseQuantity(getRowValue(row, PCS_KEYS));
+      const kgQuantity = parseQuantity(getRowValue(row, KG_KEYS));
+      const genericQuantity = parseQuantity(getRowValue(row, GENERIC_QTY_KEYS));
 
-      const quantity =
-        pcsQuantity ?? kgQuantity ?? genericQuantity;
+      const quantity = pcsQuantity ?? kgQuantity ?? genericQuantity;
 
+      const rawUnit = getRowValue(row, UNIT_KEYS);
       const unit =
         pcsQuantity !== null
           ? 'PCS'
           : kgQuantity !== null
             ? 'KGS'
-            : ((row['Unit'] ?? row['unit'] ?? null) as string | null);
+            : (rawUnit as string | null);
 
-      const inwardDateValue = row['Date'] ?? row['Inward Date'] ?? null;
-      const inwardDate = toIsoDate(inwardDateValue);
-
-      const color = (
-        row['Color'] ??
-        row['Colour'] ??
-        row['Color/type'] ??
-        null
-      ) as string | null;
+      const inwardDate = toIsoDate(getRowValue(row, DATE_KEYS));
+      const color = getRowValue(row, COLOR_KEYS) as string | null;
 
       return {
         rawRowNo: index + 2,
@@ -133,5 +149,54 @@ export function parseInwardWorkbook(buffer: Buffer): ParsedInwardRow[] {
         rawPayload: row,
       };
     })
-    .filter((r) => r.rawItemName);
+    .filter((row) => row.rawItemName);
+}
+
+function scoreParsedRows(rows: ParsedInwardRow[]) {
+  const headerKeys = new Set(rows.flatMap((row) => Object.keys(row.rawPayload).map(normalizeHeaderKey)));
+  const rowsWithQuantity = rows.filter((row) => row.quantity !== null).length;
+  const rowsWithDate = rows.filter((row) => row.inwardDate !== null).length;
+  const rowsWithQuantityAndDate = rows.filter(
+    (row) => row.quantity !== null && row.inwardDate !== null
+  ).length;
+
+  const headerScore =
+    (DATE_KEYS.some((key) => headerKeys.has(normalizeHeaderKey(key))) ? 40 : 0) +
+    ([...PCS_KEYS, ...KG_KEYS, ...GENERIC_QTY_KEYS].some((key) =>
+      headerKeys.has(normalizeHeaderKey(key))
+    )
+      ? 40
+      : 0) +
+    (headerKeys.has(normalizeHeaderKey('Avg W, In Kgs')) ? 15 : 0);
+
+  return (
+    headerScore +
+    rowsWithQuantityAndDate * 12 +
+    rowsWithQuantity * 4 +
+    rowsWithDate * 4 +
+    rows.length
+  );
+}
+
+export function parseInwardWorkbook(buffer: Buffer): ParsedInwardRow[] {
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const parsedSheets = workbook.SheetNames.map((sheetName) => ({
+    sheetName,
+    rows: parseWorksheet(workbook.Sheets[sheetName]),
+  })).filter((sheet) => sheet.rows.length > 0);
+
+  if (!parsedSheets.length) {
+    return [];
+  }
+
+  parsedSheets.sort((left, right) => {
+    const scoreDelta = scoreParsedRows(right.rows) - scoreParsedRows(left.rows);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+
+    return workbook.SheetNames.indexOf(left.sheetName) - workbook.SheetNames.indexOf(right.sheetName);
+  });
+
+  return parsedSheets[0].rows;
 }

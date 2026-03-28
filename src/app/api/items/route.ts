@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveItemFamily } from '@/lib/item-family';
 import { resolveItemFamilies } from '@/lib/item-family-links';
+import { selectNewestBatchPerFileName } from '@/lib/import-batches';
 import { normalizeItemName } from '@/lib/sku-normalizer';
 import { getSupabaseServerClient } from '@/lib/supabase';
 
@@ -88,11 +89,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: batchError.message }, { status: 500 });
   }
 
-  const latestBatchIds = [
-    ...new Map(
-      ((batches ?? []) as BatchRecord[]).map((batch) => [batch.file_name, batch])
-    ).values(),
-  ].map((batch) => batch.id);
+  const latestBatchIds = selectNewestBatchPerFileName(
+    (batches ?? []) as BatchRecord[]
+  ).map((batch) => batch.id);
 
   if (!latestBatchIds.length) {
     return NextResponse.json({ items: [], familyOptions: [] });

@@ -1,4 +1,5 @@
 import { getBomDetailBySku, listBomModels } from '@/lib/bom';
+import { selectNewestBatchPerFileName } from '@/lib/import-batches';
 import { deriveItemFamily } from '@/lib/item-family';
 import { resolveItemFamilies } from '@/lib/item-family-links';
 import { getSupabaseInventoryServerClient } from '@/lib/supabase';
@@ -499,11 +500,9 @@ export async function getStockListItems() {
     throw new Error(`Failed to load inventory items: ${itemError.message}`);
   }
 
-  const latestBatchIds = [
-    ...new Map(
-      ((batches ?? []) as BatchRecord[]).map((batch) => [batch.file_name, batch])
-    ).values(),
-  ].map((batch) => batch.id);
+  const latestBatchIds = selectNewestBatchPerFileName(
+    (batches ?? []) as BatchRecord[]
+  ).map((batch) => batch.id);
 
   const itemList = (items ?? []) as ItemRecord[];
   const allItemIds = new Set(itemList.map((item) => item.id));

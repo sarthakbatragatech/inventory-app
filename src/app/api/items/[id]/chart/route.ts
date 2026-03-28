@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { selectNewestBatchPerFileName } from '@/lib/import-batches';
 import { getSupabaseServerClient } from '@/lib/supabase';
 
 type BatchRecord = {
@@ -56,11 +57,9 @@ export async function GET(
     return NextResponse.json({ error: batchError.message }, { status: 500 });
   }
 
-  const latestBatchIds = [
-    ...new Map(
-      ((batches ?? []) as BatchRecord[]).map((batch) => [batch.file_name, batch])
-    ).values(),
-  ].map((batch) => batch.id);
+  const latestBatchIds = selectNewestBatchPerFileName(
+    (batches ?? []) as BatchRecord[]
+  ).map((batch) => batch.id);
 
   if (!latestBatchIds.length) {
     return NextResponse.json({ points: [] });

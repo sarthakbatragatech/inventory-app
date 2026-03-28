@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { ItemHeaderEditor } from '@/components/items/item-detail-client';
 import { InwardHistoryEditor } from '@/components/items/inward-history-editor';
 import { InwardTrendChart } from '@/components/items/inward-trend-chart';
+import { selectNewestBatchPerFileName } from '@/lib/import-batches';
 import { deriveItemFamily } from '@/lib/item-family';
 import { resolveItemFamilies } from '@/lib/item-family-links';
 import { normalizeItemName } from '@/lib/sku-normalizer';
@@ -205,11 +206,9 @@ export default async function ItemPage({ params }: PageProps) {
     throw new Error(itemOptionsError.message);
   }
 
-  const latestBatches = [
-    ...new Map(
-      ((batches ?? []) as BatchRecord[]).map((batch) => [batch.file_name, batch])
-    ).values(),
-  ];
+  const latestBatches = selectNewestBatchPerFileName(
+    (batches ?? []) as BatchRecord[]
+  );
 
   const batchIds = latestBatches.map((batch) => batch.id);
   const batchById = new Map(latestBatches.map((batch) => [batch.id, batch]));
