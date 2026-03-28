@@ -15,6 +15,8 @@ interface StockItem {
   inwardQty: number;
   consumedQty: number;
   reorderThresholdQty: number;
+  pendingOrderQty: number;
+  pendingOrderReorderQty: number;
   balanceQty: number;
   lastInward: string | null;
   lastInwardQty: number | null;
@@ -41,8 +43,10 @@ type ModelSnapshotComponent = {
   unit: string | null;
   inwardQty: number;
   selectedModelConsumedQty: number;
+  selectedPendingOrderQty: number;
   consumedQty: number;
   reorderThresholdQty: number;
+  pendingOrderReorderQty: number;
   balanceQty: number;
 };
 
@@ -82,6 +86,8 @@ type SortKey =
   | 'inwardQty'
   | 'consumedQty'
   | 'reorderThresholdQty'
+  | 'pendingOrderQty'
+  | 'pendingOrderReorderQty'
   | 'balanceQty'
   | 'lastInward';
 
@@ -403,9 +409,11 @@ export default function StockPage() {
     setSortKey(nextKey);
     setSortDirection(
       nextKey === 'lastInward' ||
-        nextKey === 'inwardQty' ||
+      nextKey === 'inwardQty' ||
         nextKey === 'consumedQty' ||
         nextKey === 'reorderThresholdQty' ||
+        nextKey === 'pendingOrderQty' ||
+        nextKey === 'pendingOrderReorderQty' ||
         nextKey === 'balanceQty'
         ? 'desc'
         : 'asc'
@@ -418,6 +426,63 @@ export default function StockPage() {
     }
 
     return sortDirection === 'asc' ? '↑' : '↓';
+  }
+
+  function renderSortArrowHeader(key: SortKey, align: 'left' | 'right' = 'left') {
+    const isActive = sortKey === key;
+
+    return (
+      <button
+        type="button"
+        onClick={() => toggleSort(key)}
+        aria-label={`Sort by ${key}`}
+        className={`group flex h-8 w-full items-center ${
+          align === 'right' ? 'justify-end' : 'justify-start'
+        }`}
+      >
+        <span
+          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold transition ${
+            isActive
+              ? 'border-sky-200 bg-sky-50 text-sky-700 shadow-sm'
+              : 'border-neutral-200 bg-white text-neutral-500 group-hover:border-neutral-300 group-hover:text-neutral-700'
+          }`}
+        >
+          {sortIndicator(key)}
+        </span>
+      </button>
+    );
+  }
+
+  function renderSortLabelHeader(
+    key: SortKey,
+    label: string,
+    eyebrow: string,
+    align: 'left' | 'right' = 'left'
+  ) {
+    const isActive = sortKey === key;
+
+    return (
+      <button
+        type="button"
+        onClick={() => toggleSort(key)}
+        className={`group flex h-10 w-full ${
+          align === 'right' ? 'justify-end text-right' : 'justify-start text-left'
+        }`}
+      >
+        <span className="min-w-0">
+          <span className="block text-[9px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
+            {eyebrow}
+          </span>
+          <span
+            className={`mt-0.5 block text-[13px] font-semibold leading-4 transition ${
+              isActive ? 'text-sky-900' : 'text-neutral-950 group-hover:text-neutral-700'
+            }`}
+          >
+            {label}
+          </span>
+        </span>
+      </button>
+    );
   }
 
   const sortedItems = [...items].sort((left, right) => {
@@ -445,6 +510,12 @@ export default function StockPage() {
       case 'reorderThresholdQty':
         result = left.reorderThresholdQty - right.reorderThresholdQty;
         break;
+      case 'pendingOrderQty':
+        result = left.pendingOrderQty - right.pendingOrderQty;
+        break;
+      case 'pendingOrderReorderQty':
+        result = left.pendingOrderReorderQty - right.pendingOrderReorderQty;
+        break;
       case 'balanceQty':
         result = left.balanceQty - right.balanceQty;
         break;
@@ -468,8 +539,8 @@ export default function StockPage() {
           className="mb-5 max-w-4xl text-base leading-8 text-neutral-700 sm:mb-6 sm:text-sm sm:leading-6"
           suppressHydrationWarning
         >
-          Review inventory-wide inward, BOM-driven consumption, reorder threshold,
-          current balance, and model-scoped BOM pressure from one page.
+          Review inventory-wide inward, BOM-driven consumption, orders in hand,
+          reorder threshold, current balance, and model-scoped BOM pressure from one page.
         </p>
 
         <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -634,6 +705,14 @@ export default function StockPage() {
                     </div>
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                        Orders In Hand
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-neutral-950">
+                        {formatQuantity(item.pendingOrderQty, item.default_unit)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
                         Balance
                       </div>
                       <div
@@ -644,6 +723,20 @@ export default function StockPage() {
                         }`}
                       >
                         {formatQuantity(item.balanceQty, item.default_unit)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                        Need to Buy
+                      </div>
+                      <div
+                        className={`mt-1 text-sm font-semibold ${
+                          item.pendingOrderReorderQty > 0
+                            ? 'text-rose-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {formatQuantity(item.pendingOrderReorderQty, item.default_unit)}
                       </div>
                     </div>
                     <div className="col-span-2">
@@ -668,53 +761,76 @@ export default function StockPage() {
             </div>
 
             <div className="hidden overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm md:block">
-              <table className="min-w-full text-sm">
-                <thead className="bg-neutral-100 text-left">
-                  <tr>
-                    <th className="px-4 py-3">
-                      <button type="button" onClick={() => toggleSort('sku')} className="font-semibold">
-                        SKU {sortIndicator('sku')}
-                      </button>
+              <table className="w-full table-fixed text-sm">
+                <thead className="bg-[linear-gradient(180deg,rgba(250,250,250,0.96),rgba(244,244,245,0.96))] text-left">
+                  <tr className="h-8">
+                    <th className="w-[10%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('sku')}
                     </th>
-                    <th className="px-4 py-3">
-                      <button type="button" onClick={() => toggleSort('item_name')} className="font-semibold">
-                        Name {sortIndicator('item_name')}
-                      </button>
+                    <th className="w-[15%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('item_name')}
                     </th>
-                    <th className="px-4 py-3">
-                      <button type="button" onClick={() => toggleSort('family')} className="font-semibold">
-                        Family {sortIndicator('family')}
-                      </button>
+                    <th className="w-[8%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('family')}
                     </th>
-                    <th className="px-4 py-3">
-                      <button type="button" onClick={() => toggleSort('category')} className="font-semibold">
-                        Category {sortIndicator('category')}
-                      </button>
+                    <th className="w-[7%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('category')}
                     </th>
-                    <th className="px-4 py-3">
-                      <button type="button" onClick={() => toggleSort('inwardQty')} className="font-semibold">
-                        Inward {sortIndicator('inwardQty')}
-                      </button>
+                    <th className="w-[7%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('inwardQty', 'right')}
                     </th>
-                    <th className="px-4 py-3">
-                      <button type="button" onClick={() => toggleSort('consumedQty')} className="font-semibold">
-                        Consumed {sortIndicator('consumedQty')}
-                      </button>
+                    <th className="w-[7%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('consumedQty', 'right')}
                     </th>
-                    <th className="px-4 py-3">
-                      <button type="button" onClick={() => toggleSort('reorderThresholdQty')} className="font-semibold">
-                        Threshold {sortIndicator('reorderThresholdQty')}
-                      </button>
+                    <th className="w-[7%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('reorderThresholdQty', 'right')}
                     </th>
-                    <th className="px-4 py-3">
-                      <button type="button" onClick={() => toggleSort('balanceQty')} className="font-semibold">
-                        Balance {sortIndicator('balanceQty')}
-                      </button>
+                    <th className="w-[8.5%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('pendingOrderQty', 'right')}
                     </th>
-                    <th className="px-4 py-3">
-                      <button type="button" onClick={() => toggleSort('lastInward')} className="font-semibold">
-                        Last Inward {sortIndicator('lastInward')}
-                      </button>
+                    <th className="w-[8.5%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('pendingOrderReorderQty', 'right')}
+                    </th>
+                    <th className="w-[8.5%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('balanceQty', 'right')}
+                    </th>
+                    <th className="w-[8.5%] px-2 pb-0 pt-2 align-bottom">
+                      {renderSortArrowHeader('lastInward', 'right')}
+                    </th>
+                  </tr>
+                  <tr className="h-10 border-b border-neutral-200/80">
+                    <th className="w-[10%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('sku', 'SKU', 'Code')}
+                    </th>
+                    <th className="w-[15%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('item_name', 'Name', 'Item')}
+                    </th>
+                    <th className="w-[8%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('family', 'Family', 'Grouping')}
+                    </th>
+                    <th className="w-[7%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('category', 'Category', 'Material')}
+                    </th>
+                    <th className="w-[7%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('inwardQty', 'Inward', 'Stock', 'right')}
+                    </th>
+                    <th className="w-[7%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('consumedQty', 'Consumed', 'Usage', 'right')}
+                    </th>
+                    <th className="w-[7%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('reorderThresholdQty', 'Threshold', 'Monthly', 'right')}
+                    </th>
+                    <th className="w-[8.5%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('pendingOrderQty', 'Orders In Hand', 'Open Orders', 'right')}
+                    </th>
+                    <th className="w-[8.5%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('pendingOrderReorderQty', 'Need to Buy', 'Purchase Gap', 'right')}
+                    </th>
+                    <th className="w-[8.5%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('balanceQty', 'Balance', 'Current', 'right')}
+                    </th>
+                    <th className="w-[8.5%] px-2 pb-2 pt-0.5 align-top">
+                      {renderSortLabelHeader('lastInward', 'Last Inward', 'Recent', 'right')}
                     </th>
                   </tr>
                 </thead>
@@ -725,10 +841,10 @@ export default function StockPage() {
                       key={item.id}
                       className="border-t border-neutral-200 transition hover:bg-sky-50/70"
                     >
-                      <td className="px-4 py-3 font-medium text-neutral-700">{item.sku}</td>
-                      <td className="px-4 py-3">{item.item_name}</td>
-                      <td className="px-4 py-3">{renderFamilySummary(item.family, item.families)}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2.5 text-[13px] font-medium text-neutral-700">{item.sku}</td>
+                      <td className="px-3 py-2.5 text-[13px]">{item.item_name}</td>
+                      <td className="px-3 py-2.5">{renderFamilySummary(item.family, item.families)}</td>
+                      <td className="px-3 py-2.5">
                         <span
                           className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
                             item.category
@@ -740,17 +856,29 @@ export default function StockPage() {
                           {formatCategory(item.category)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-semibold">
+                      <td className="whitespace-nowrap px-2.5 py-2.5 text-right text-[12.5px] font-semibold tabular-nums">
                         {formatQuantity(item.inwardQty, item.default_unit)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-2.5 py-2.5 text-right text-[12.5px] tabular-nums">
                         {formatQuantity(item.consumedQty, item.default_unit)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-2.5 py-2.5 text-right text-[12.5px] tabular-nums">
                         {formatQuantity(item.reorderThresholdQty, item.default_unit)}
                       </td>
+                      <td className="whitespace-nowrap px-2.5 py-2.5 text-right text-[12.5px] tabular-nums">
+                        {formatQuantity(item.pendingOrderQty, item.default_unit)}
+                      </td>
                       <td
-                        className={`px-4 py-3 font-semibold ${
+                        className={`whitespace-nowrap px-2.5 py-2.5 text-right text-[12.5px] font-semibold tabular-nums ${
+                          item.pendingOrderReorderQty > 0
+                            ? 'text-rose-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {formatQuantity(item.pendingOrderReorderQty, item.default_unit)}
+                      </td>
+                      <td
+                        className={`whitespace-nowrap px-2.5 py-2.5 text-right text-[12.5px] font-semibold tabular-nums ${
                           item.balanceQty < item.reorderThresholdQty
                             ? 'text-rose-700'
                             : 'text-emerald-700'
@@ -758,7 +886,7 @@ export default function StockPage() {
                       >
                         {formatQuantity(item.balanceQty, item.default_unit)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-2.5 py-2.5 text-right text-[12.5px] tabular-nums">
                         {item.lastInward ? (
                           <div>
                             <div>{formatInwardDate(item.lastInward)}</div>
@@ -950,6 +1078,28 @@ export default function StockPage() {
                         {formatQuantity(component.reorderThresholdQty, component.unit)}
                       </div>
                     </div>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                        Orders In Hand
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-neutral-950">
+                        {formatQuantity(component.selectedPendingOrderQty, component.unit)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                        Need to Buy
+                      </div>
+                      <div
+                        className={`mt-1 text-sm font-semibold ${
+                          component.pendingOrderReorderQty > 0
+                            ? 'text-rose-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {formatQuantity(component.pendingOrderReorderQty, component.unit)}
+                      </div>
+                    </div>
                     <div className="col-span-2">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
                         Balance
@@ -970,16 +1120,18 @@ export default function StockPage() {
             </div>
 
             <div className="hidden overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm md:block">
-              <table className="min-w-full text-sm">
+              <table className="w-full table-fixed text-sm">
                 <thead className="bg-neutral-100 text-left">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">Component SKU</th>
-                    <th className="px-4 py-3 font-semibold">Component</th>
-                    <th className="px-4 py-3 font-semibold">Inward</th>
-                    <th className="px-4 py-3 font-semibold">{selectedScopeLabel}</th>
-                    <th className="px-4 py-3 font-semibold">All Models</th>
-                    <th className="px-4 py-3 font-semibold">Threshold</th>
-                    <th className="px-4 py-3 font-semibold">Balance</th>
+                    <th className="w-[12%] px-3 py-3 font-semibold">Component SKU</th>
+                    <th className="w-[24%] px-3 py-3 font-semibold">Component</th>
+                    <th className="w-[7%] px-2.5 py-3 text-right font-semibold">Inward</th>
+                    <th className="w-[9%] px-2.5 py-3 text-right font-semibold">{selectedScopeLabel}</th>
+                    <th className="w-[9%] px-2.5 py-3 text-right font-semibold">All Models</th>
+                    <th className="w-[8%] px-2.5 py-3 text-right font-semibold">Threshold</th>
+                    <th className="w-[9%] px-2.5 py-3 text-right font-semibold">Orders In Hand</th>
+                    <th className="w-[8%] px-2.5 py-3 text-right font-semibold">Need to Buy</th>
+                    <th className="w-[7%] px-2.5 py-3 text-right font-semibold">Balance</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -988,24 +1140,36 @@ export default function StockPage() {
                       key={component.componentItemId}
                       className="border-t border-neutral-200 transition hover:bg-sky-50/70"
                     >
-                      <td className="px-4 py-3 font-medium text-neutral-700">
+                      <td className="px-3 py-3 font-medium text-neutral-700">
                         {component.componentSku}
                       </td>
-                      <td className="px-4 py-3">{component.componentName}</td>
-                      <td className="px-4 py-3 font-semibold">
+                      <td className="px-3 py-3">{component.componentName}</td>
+                      <td className="px-2.5 py-3 text-right font-semibold tabular-nums">
                         {formatQuantity(component.inwardQty, component.unit)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-3 text-right tabular-nums">
                         {formatQuantity(component.selectedModelConsumedQty, component.unit)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-3 text-right tabular-nums">
                         {formatQuantity(component.consumedQty, component.unit)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-3 text-right tabular-nums">
                         {formatQuantity(component.reorderThresholdQty, component.unit)}
                       </td>
+                      <td className="px-2.5 py-3 text-right tabular-nums">
+                        {formatQuantity(component.selectedPendingOrderQty, component.unit)}
+                      </td>
                       <td
-                        className={`px-4 py-3 font-semibold ${
+                        className={`px-2.5 py-3 text-right font-semibold tabular-nums ${
+                          component.pendingOrderReorderQty > 0
+                            ? 'text-rose-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {formatQuantity(component.pendingOrderReorderQty, component.unit)}
+                      </td>
+                      <td
+                        className={`px-2.5 py-3 text-right font-semibold tabular-nums ${
                           component.balanceQty < component.reorderThresholdQty
                             ? 'text-rose-700'
                             : 'text-emerald-700'

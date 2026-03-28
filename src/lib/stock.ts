@@ -2,6 +2,7 @@ import { getBomDetailBySku, listBomModels } from '@/lib/bom';
 import { selectNewestBatchPerFileName } from '@/lib/import-batches';
 import { deriveItemFamily } from '@/lib/item-family';
 import { resolveItemFamilies } from '@/lib/item-family-links';
+import { listOrderPortalPendingOrders } from '@/lib/order-pending';
 import { getSupabaseInventoryServerClient } from '@/lib/supabase';
 
 export type StockComponentRow = {
@@ -11,8 +12,10 @@ export type StockComponentRow = {
   unit: string | null;
   inwardQty: number;
   selectedModelConsumedQty: number;
+  selectedPendingOrderQty: number;
   consumedQty: number;
   reorderThresholdQty: number;
+  pendingOrderReorderQty: number;
   balanceQty: number;
 };
 
@@ -38,6 +41,8 @@ export type StockListItem = {
   inwardQty: number;
   consumedQty: number;
   reorderThresholdQty: number;
+  pendingOrderQty: number;
+  pendingOrderReorderQty: number;
   balanceQty: number;
   lastInward: string | null;
   lastInwardQty: number | null;
@@ -388,6 +393,7 @@ async function buildStockSnapshot(input: {
   fgName: string | null;
   isAggregate: boolean;
   selectedComponentUsage: Map<string, ComponentUsage>;
+  selectedPendingComponentUsage: Map<string, ComponentUsage>;
   selectedSalesRows: Array<{ sale_date: string; qty: number }>;
   globalComponentUsage: Map<string, ComponentUsage>;
   globalComponentUsageByDate: Map<string, Map<string, number>>;
@@ -425,6 +431,8 @@ async function buildStockSnapshot(input: {
     .map((component) => {
       const inwardQty = inwardTotals.get(component.componentItemId) ?? 0;
       const selectedModelConsumedQty = component.consumedQty;
+      const selectedPendingOrderQty =
+        input.selectedPendingComponentUsage.get(component.componentItemId)?.consumedQty ?? 0;
       const consumedQty =
         input.globalComponentUsage.get(component.componentItemId)?.consumedQty ?? 0;
       const reorderThresholdQty = consumedQty / input.monthSpan;
@@ -443,8 +451,10 @@ async function buildStockSnapshot(input: {
         unit: component.unit,
         inwardQty,
         selectedModelConsumedQty,
+        selectedPendingOrderQty,
         consumedQty,
         reorderThresholdQty,
+        pendingOrderReorderQty: Math.max(selectedPendingOrderQty - balanceQty, 0),
         balanceQty,
       };
     })
@@ -471,10 +481,77 @@ async function buildStockSnapshot(input: {
   } satisfies StockModelSnapshot;
 }
 
+async function loadPendingComponentDemand(
+  bomDetails: Awaited<ReturnType<typeof loadComponentConsumption>>['bomDetails']
+) {
+  try {
+    const pendingRows = await listOrderPortalPendingOrders();
+    const bomBySku = new Map(bomDetails.map((detail) => [detail.model.fg_sku, detail]));
+    const globalPendingComponentUsage = new Map<string, ComponentUsage>();
+    const selectedPendingComponentUsageByFgSku = new Map<
+      string,
+      Map<string, ComponentUsage>
+    >();
+
+    for (const row of pendingRows) {
+      const detail = bomBySku.get(row.model_key);
+      if (!detail) {
+        continue;
+      }
+
+      const version = pickBomVersionForDate(detail.versions, row.reference_date);
+      if (!version) {
+        continue;
+      }
+
+      for (const line of version.lines) {
+        const qtyToAdd = row.qty * line.qty_per_fg;
+        const globalExisting = globalPendingComponentUsage.get(line.component_item_id) ?? {
+          componentItemId: line.component_item_id,
+          componentSku: line.component_sku,
+          componentName: line.component_name,
+          unit: line.unit,
+          consumedQty: 0,
+        };
+
+        globalExisting.consumedQty += qtyToAdd;
+        globalPendingComponentUsage.set(line.component_item_id, globalExisting);
+
+        const selectedMap =
+          selectedPendingComponentUsageByFgSku.get(detail.model.fg_sku) ?? new Map();
+        const selectedExisting = selectedMap.get(line.component_item_id) ?? {
+          componentItemId: line.component_item_id,
+          componentSku: line.component_sku,
+          componentName: line.component_name,
+          unit: line.unit,
+          consumedQty: 0,
+        };
+
+        selectedExisting.consumedQty += qtyToAdd;
+        selectedMap.set(line.component_item_id, selectedExisting);
+        selectedPendingComponentUsageByFgSku.set(detail.model.fg_sku, selectedMap);
+      }
+    }
+
+    return {
+      globalPendingComponentUsage,
+      selectedPendingComponentUsageByFgSku,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unknown pending order demand error';
+    console.error('Failed to load pending order demand for stock:', message);
+    return {
+      globalPendingComponentUsage: new Map<string, ComponentUsage>(),
+      selectedPendingComponentUsageByFgSku: new Map<string, Map<string, ComponentUsage>>(),
+    };
+  }
+}
+
 export async function getStockListItems() {
   const supabase = getSupabaseInventoryServerClient();
   const [
-    { globalComponentUsage, globalComponentUsageByDate, monthSpan },
+    { bomDetails, globalComponentUsage, globalComponentUsageByDate, monthSpan },
     { data: batches, error: batchError },
     { data: items, error: itemError },
   ] = await Promise.all([
@@ -507,6 +584,11 @@ export async function getStockListItems() {
   const itemList = (items ?? []) as ItemRecord[];
   const allItemIds = new Set(itemList.map((item) => item.id));
   for (const componentItemId of globalComponentUsage.keys()) {
+    allItemIds.add(componentItemId);
+  }
+
+  const { globalPendingComponentUsage } = await loadPendingComponentDemand(bomDetails);
+  for (const componentItemId of globalPendingComponentUsage.keys()) {
     allItemIds.add(componentItemId);
   }
 
@@ -566,6 +648,8 @@ export async function getStockListItems() {
       ];
       const consumed = globalComponentUsage.get(itemId);
       const reorderThresholdQty = (consumed?.consumedQty ?? 0) / monthSpan;
+      const pendingOrderQty =
+        globalPendingComponentUsage.get(itemId)?.consumedQty ?? 0;
       const sku = item?.sku || consumed?.componentSku || '';
       const itemName = item?.item_name || consumed?.componentName || '';
       const balanceQty = calculateBalancedQtyFromLatestReconciliation({
@@ -590,6 +674,8 @@ export async function getStockListItems() {
         inwardQty,
         consumedQty: consumed?.consumedQty ?? 0,
         reorderThresholdQty,
+        pendingOrderQty,
+        pendingOrderReorderQty: Math.max(pendingOrderQty - balanceQty, 0),
         balanceQty,
         lastInward: lastInward?.inward_date ?? null,
         lastInwardQty: lastInward?.quantity ?? null,
@@ -597,7 +683,9 @@ export async function getStockListItems() {
       };
     })
     .filter((item) => item.sku || item.item_name)
-    .filter((item) => item.inwardQty > 0 || item.consumedQty > 0);
+    .filter(
+      (item) => item.inwardQty > 0 || item.consumedQty > 0 || item.pendingOrderQty > 0
+    );
 
   const { familyByItemId } = await resolveItemFamilies(
     stockItems.map((item) => ({
@@ -658,15 +746,21 @@ export async function getStockSnapshotByFgSku(fgSku: string) {
     selectedComponentUsageByFgSku,
     monthSpan,
   } = await loadComponentConsumption();
+  const { selectedPendingComponentUsageByFgSku } = await loadPendingComponentDemand([
+    detail,
+  ]);
 
   const selectedComponentUsage =
     selectedComponentUsageByFgSku.get(detail.model.fg_sku) ?? new Map();
+  const selectedPendingComponentUsage =
+    selectedPendingComponentUsageByFgSku.get(detail.model.fg_sku) ?? new Map();
   const selectedModelSalesRows = salesByFgSku.get(detail.model.fg_sku) ?? [];
   return buildStockSnapshot({
     fgSku: detail.model.fg_sku,
     fgName: detail.model.fg_name,
     isAggregate: false,
     selectedComponentUsage,
+    selectedPendingComponentUsage,
     selectedSalesRows: selectedModelSalesRows,
     globalComponentUsage,
     globalComponentUsageByDate,
@@ -701,6 +795,9 @@ export async function getStockSnapshotByFgSkus(
     selectedComponentUsageByFgSku,
     monthSpan,
   } = await loadComponentConsumption();
+  const { selectedPendingComponentUsageByFgSku } = await loadPendingComponentDemand(
+    bomDetails
+  );
 
   const selectedFgSkuSet = new Set(normalizedFgSkus);
   const selectedDetails = bomDetails.filter((detail) => selectedFgSkuSet.has(detail.model.fg_sku));
@@ -710,10 +807,13 @@ export async function getStockSnapshotByFgSkus(
   }
 
   const selectedComponentUsage = new Map<string, ComponentUsage>();
+  const selectedPendingComponentUsage = new Map<string, ComponentUsage>();
   const selectedSalesRows: Array<{ sale_date: string; qty: number }> = [];
 
   for (const detail of selectedDetails) {
     const usage = selectedComponentUsageByFgSku.get(detail.model.fg_sku) ?? new Map();
+    const pendingUsage =
+      selectedPendingComponentUsageByFgSku.get(detail.model.fg_sku) ?? new Map();
     const salesRows = salesByFgSku.get(detail.model.fg_sku) ?? [];
     selectedSalesRows.push(...salesRows);
 
@@ -729,6 +829,19 @@ export async function getStockSnapshotByFgSkus(
       existing.consumedQty += component.consumedQty;
       selectedComponentUsage.set(component.componentItemId, existing);
     }
+
+    for (const component of pendingUsage.values()) {
+      const existing = selectedPendingComponentUsage.get(component.componentItemId) ?? {
+        componentItemId: component.componentItemId,
+        componentSku: component.componentSku,
+        componentName: component.componentName,
+        unit: component.unit,
+        consumedQty: 0,
+      };
+
+      existing.consumedQty += component.consumedQty;
+      selectedPendingComponentUsage.set(component.componentItemId, existing);
+    }
   }
 
   return buildStockSnapshot({
@@ -736,6 +849,7 @@ export async function getStockSnapshotByFgSkus(
     fgName: options?.fgNameLabel ?? 'All Models',
     isAggregate: true,
     selectedComponentUsage,
+    selectedPendingComponentUsage,
     selectedSalesRows,
     globalComponentUsage,
     globalComponentUsageByDate,

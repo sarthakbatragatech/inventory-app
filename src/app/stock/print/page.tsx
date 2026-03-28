@@ -79,7 +79,7 @@ export default async function StockPrintPage({ searchParams }: PageProps) {
             Stock Snapshot
           </h1>
           <div className="mt-2 text-sm text-neutral-600">
-            Current inventory view with the selected filters applied.
+            Current inventory view with the selected filters and orders in hand applied.
           </div>
         </div>
 
@@ -123,6 +123,8 @@ export default async function StockPrintPage({ searchParams }: PageProps) {
                 <th className="px-4 py-3 font-semibold">Inward</th>
                 <th className="px-4 py-3 font-semibold">Consumed</th>
                 <th className="px-4 py-3 font-semibold">Threshold</th>
+                <th className="px-4 py-3 font-semibold">Orders In Hand</th>
+                <th className="px-4 py-3 font-semibold">Need to Buy</th>
                 <th className="px-4 py-3 font-semibold">Balance</th>
                 <th className="px-4 py-3 font-semibold">Last Inward</th>
               </tr>
@@ -140,6 +142,16 @@ export default async function StockPrintPage({ searchParams }: PageProps) {
                   <td className="px-4 py-3">{formatQuantity(item.consumedQty, item.default_unit)}</td>
                   <td className="px-4 py-3">
                     {formatQuantity(item.reorderThresholdQty, item.default_unit)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {formatQuantity(item.pendingOrderQty, item.default_unit)}
+                  </td>
+                  <td
+                    className={`px-4 py-3 font-semibold ${
+                      item.pendingOrderReorderQty > 0 ? 'text-rose-700' : 'text-neutral-900'
+                    }`}
+                  >
+                    {formatQuantity(item.pendingOrderReorderQty, item.default_unit)}
                   </td>
                   <td
                     className={`px-4 py-3 font-semibold ${
