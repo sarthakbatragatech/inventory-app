@@ -19,6 +19,10 @@ Set these in `.env.local` for local development and in Vercel for deployment:
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
+ORDER_SUPABASE_URL=...
+ORDER_SUPABASE_SERVICE_ROLE_KEY=...
+# Optional fallback if you do not want to use the service role key:
+ORDER_SUPABASE_ANON_KEY=...
 ```
 
 ## Deployment
@@ -35,11 +39,13 @@ npm run build
 In Vercel:
 
 1. Import the repository.
-2. Add the three Supabase environment variables for Production and Preview.
-3. Deploy.
+2. Add the inventory Supabase variables for Production and Preview.
+3. Add the order-portal Supabase variables if you use `/api/sync-sales` or the "Sync Sales" button.
+4. Deploy.
 
 ## Notes
 
 - Uploads are handled through App Router route handlers.
 - Item detail pages include an inward history table and a Vega bar chart fed by `/api/items/[id]/chart`.
 - Supabase service-role access is used on the server, so `SUPABASE_SERVICE_ROLE_KEY` must only be configured in server environments.
+- Sales sync reads from a separate order-portal Supabase project, so `ORDER_SUPABASE_URL` plus either `ORDER_SUPABASE_SERVICE_ROLE_KEY` or `ORDER_SUPABASE_ANON_KEY` must be present anywhere `/api/sync-sales` runs.
