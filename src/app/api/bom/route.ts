@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
 
     const { data: versions, error: versionError } = await supabase
       .from('bom_versions')
-      .select('version_no')
+      .select('id, version_no')
       .eq('bom_model_id', modelId)
       .order('version_no', { ascending: false })
       .limit(1);
@@ -154,6 +154,35 @@ export async function POST(request: NextRequest) {
 
     if (insertVersionError) {
       return NextResponse.json({ error: insertVersionError.message }, { status: 500 });
+    }
+
+    const previousVersionId = (versions ?? [])[0]?.id ?? null;
+    if (previousVersionId) {
+      const { data: previousVariantLines, error: previousVariantError } = await supabase
+        .from('bom_variant_lines')
+        .select(
+          'color_variant, component_item_id, component_sku, component_name, qty_per_fg, unit, sort_order, notes'
+        )
+        .eq('bom_version_id', previousVersionId);
+
+      if (previousVariantError) {
+        return NextResponse.json({ error: previousVariantError.message }, { status: 500 });
+      }
+
+      if (previousVariantLines?.length) {
+        const { error: copyVariantError } = await supabase
+          .from('bom_variant_lines')
+          .insert(
+            previousVariantLines.map((line) => ({
+              bom_version_id: insertedVersion.id,
+              ...line,
+            }))
+          );
+
+        if (copyVariantError) {
+          return NextResponse.json({ error: copyVariantError.message }, { status: 500 });
+        }
+      }
     }
 
     const detail = await getBomDetailBySku(fgSku);

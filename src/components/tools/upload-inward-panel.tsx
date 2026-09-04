@@ -146,15 +146,15 @@ export function UploadInwardPanel({
               <div className="mt-1 text-2xl font-semibold">{result.overwrittenRows ?? 0}</div>
             </div>
             <div className="rounded-xl bg-white p-3">
-              <div className="text-xs uppercase tracking-wide text-neutral-500">Dates Replaced</div>
+              <div className="text-xs uppercase tracking-wide text-neutral-500">Dates Processed</div>
               <div className="mt-1 text-2xl font-semibold">{result.overwrittenDates ?? 0}</div>
             </div>
           </div>
           <div className="mt-3 text-xs text-neutral-500">Batch ID: {result.batchId}</div>
           {(result.overwrittenRows ?? 0) > 0 ? (
             <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sky-900">
-              Existing inward data for overlapping dates was replaced with this upload,
-              so accountant corrections and previously missing rows are now reflected.
+              Existing inward data was replaced only for matching SKUs on overlapping dates.
+              Unrelated model and component receipts on those dates were preserved.
             </div>
           ) : null}
         </div>

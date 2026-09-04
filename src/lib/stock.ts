@@ -17,6 +17,9 @@ export type StockComponentRow = {
   reorderThresholdQty: number;
   pendingOrderReorderQty: number;
   balanceQty: number;
+  lastInwardDate: string | null;
+  lastInwardQty: number | null;
+  lastInwardUnit: string | null;
 };
 
 export type StockModelSnapshot = {
@@ -59,6 +62,14 @@ type SalesRow = {
   fg_sku: string;
   sale_date: string;
   qty: number;
+};
+
+type ProductionRow = {
+  bom_model_id: string;
+  production_date: string;
+  color_variant: string;
+  quantity: number;
+  packed_quantity: number;
 };
 
 type InwardRow = {
@@ -234,14 +245,27 @@ async function loadComponentConsumption() {
   ).filter((value): value is NonNullable<typeof value> => Boolean(value));
 
   const fgSkus = bomDetails.map((modelDetail) => modelDetail.model.fg_sku);
-  const { data: salesRows, error: salesError } = await supabase
-    .from('daily_fg_sales_import')
-    .select('fg_sku, sale_date, qty')
-    .in('fg_sku', fgSkus)
-    .order('sale_date', { ascending: true });
+  const [
+    { data: salesRows, error: salesError },
+    { data: productionRows, error: productionError },
+  ] = await Promise.all([
+    supabase
+      .from('daily_fg_sales_import')
+      .select('fg_sku, sale_date, qty')
+      .in('fg_sku', fgSkus)
+      .order('sale_date', { ascending: true }),
+    supabase
+      .from('production_entries')
+      .select('bom_model_id, production_date, color_variant, quantity, packed_quantity')
+      .order('production_date', { ascending: true }),
+  ]);
 
   if (salesError) {
     throw new Error(`Failed to load model sales: ${salesError.message}`);
+  }
+
+  if (productionError) {
+    throw new Error(`Failed to load model production: ${productionError.message}`);
   }
 
   const typedSalesRows = (salesRows ?? []) as SalesRow[];
@@ -251,6 +275,28 @@ async function loadComponentConsumption() {
     map.set(row.fg_sku, existing);
     return map;
   }, new Map<string, Array<{ sale_date: string; qty: number }>>());
+  const productionByBomModelId = ((productionRows ?? []) as ProductionRow[]).reduce(
+    (map, row) => {
+      const existing = map.get(row.bom_model_id) ?? [];
+      existing.push({
+        production_date: row.production_date,
+        color_variant: row.color_variant,
+        quantity: Number(row.quantity ?? 0),
+        packed_quantity: Number(row.packed_quantity ?? 0),
+      });
+      map.set(row.bom_model_id, existing);
+      return map;
+    },
+    new Map<
+      string,
+      Array<{
+        production_date: string;
+        color_variant: string;
+        quantity: number;
+        packed_quantity: number;
+      }>
+    >()
+  );
 
   const globalComponentUsage = new Map<
     string,
@@ -280,15 +326,74 @@ async function loadComponentConsumption() {
 
   for (const modelDetail of bomDetails) {
     const modelSalesRows = salesByFgSku.get(modelDetail.model.fg_sku) ?? [];
+    const modelProductionRows = productionByBomModelId.get(modelDetail.model.id) ?? [];
+    const activityRows =
+      modelProductionRows.length > 0
+        ? modelProductionRows.map((row) => ({
+            activityDate: row.production_date,
+            assembledQuantity: row.quantity,
+            packedQuantity: row.packed_quantity,
+            colorVariant: row.color_variant,
+          }))
+        : modelSalesRows.map((row) => ({
+            activityDate: row.sale_date,
+            assembledQuantity: row.qty,
+            packedQuantity: row.qty,
+            colorVariant: null,
+          }));
 
-    for (const saleRow of modelSalesRows) {
-      const version = pickBomVersionForDate(modelDetail.versions, saleRow.sale_date);
+    const selectedMap = new Map<string, ComponentUsage>();
+    for (const version of modelDetail.versions) {
+      for (const line of [...version.lines, ...version.variantLines]) {
+        if (!selectedMap.has(line.component_item_id)) {
+          selectedMap.set(line.component_item_id, {
+            componentItemId: line.component_item_id,
+            componentSku: line.component_sku,
+            componentName: line.component_name,
+            unit: line.unit,
+            consumedQty: 0,
+          });
+        }
+
+        if (!globalComponentUsage.has(line.component_item_id)) {
+          globalComponentUsage.set(line.component_item_id, {
+            componentItemId: line.component_item_id,
+            componentSku: line.component_sku,
+            componentName: line.component_name,
+            unit: line.unit,
+            consumedQty: 0,
+          });
+        }
+      }
+    }
+    selectedComponentUsageByFgSku.set(modelDetail.model.fg_sku, selectedMap);
+
+    for (const activityRow of activityRows) {
+      const version = pickBomVersionForDate(modelDetail.versions, activityRow.activityDate);
       if (!version) {
         continue;
       }
 
-      for (const line of version.lines) {
-        const qtyToAdd = saleRow.qty * line.qty_per_fg;
+      const activityLines = [
+        ...version.lines.map((line) => ({
+          ...line,
+          activityQuantity:
+            line.consumption_stage === 'packed'
+              ? activityRow.packedQuantity
+              : activityRow.assembledQuantity,
+        })),
+        ...(activityRow.colorVariant
+          ? version.variantLines
+              .filter((line) => line.color_variant === activityRow.colorVariant)
+              .map((line) => ({
+                ...line,
+                activityQuantity: activityRow.assembledQuantity,
+              }))
+          : []),
+      ];
+
+      for (const line of activityLines) {
+        const qtyToAdd = line.activityQuantity * line.qty_per_fg;
 
         const globalExisting = globalComponentUsage.get(line.component_item_id) ?? {
           componentItemId: line.component_item_id,
@@ -302,11 +407,12 @@ async function loadComponentConsumption() {
         globalComponentUsage.set(line.component_item_id, globalExisting);
 
         const usageByDate = globalComponentUsageByDate.get(line.component_item_id) ?? new Map();
-        usageByDate.set(saleRow.sale_date, (usageByDate.get(saleRow.sale_date) ?? 0) + qtyToAdd);
+        usageByDate.set(
+          activityRow.activityDate,
+          (usageByDate.get(activityRow.activityDate) ?? 0) + qtyToAdd
+        );
         globalComponentUsageByDate.set(line.component_item_id, usageByDate);
 
-        const selectedMap =
-          selectedComponentUsageByFgSku.get(modelDetail.model.fg_sku) ?? new Map();
         const selectedExisting = selectedMap.get(line.component_item_id) ?? {
           componentItemId: line.component_item_id,
           componentSku: line.component_sku,
@@ -317,7 +423,6 @@ async function loadComponentConsumption() {
 
         selectedExisting.consumedQty += qtyToAdd;
         selectedMap.set(line.component_item_id, selectedExisting);
-        selectedComponentUsageByFgSku.set(modelDetail.model.fg_sku, selectedMap);
       }
     }
   }
@@ -411,7 +516,7 @@ async function buildStockSnapshot(input: {
   if (componentItemIds.length > 0) {
     const { data: inwardRows, error: inwardError } = await supabase
       .from('import_batch_rows')
-      .select('item_id, quantity, inward_date')
+      .select('item_id, quantity, inward_date, unit')
       .in('item_id', componentItemIds);
 
     if (inwardError) {
@@ -430,6 +535,27 @@ async function buildStockSnapshot(input: {
   const components: StockComponentRow[] = [...input.selectedComponentUsage.values()]
     .map((component) => {
       const inwardQty = inwardTotals.get(component.componentItemId) ?? 0;
+      const componentInwardRows = inwardRowsByItemId.get(component.componentItemId) ?? [];
+      const lastInwardDate = componentInwardRows.reduce<string | null>((latest, row) => {
+        if (!row.inward_date) {
+          return latest;
+        }
+
+        return !latest || row.inward_date > latest ? row.inward_date : latest;
+      }, null);
+      const lastInwardRows = lastInwardDate
+        ? componentInwardRows.filter((row) => row.inward_date === lastInwardDate)
+        : [];
+      const lastInwardQty = lastInwardDate
+        ? lastInwardRows.reduce((sum, row) => sum + Number(row.quantity ?? 0), 0)
+        : null;
+      const lastInwardUnits = [
+        ...new Set(
+          lastInwardRows
+            .map((row) => normalizeDisplayUnit(row.unit ?? null))
+            .filter((unit): unit is string => Boolean(unit))
+        ),
+      ];
       const selectedModelConsumedQty = component.consumedQty;
       const selectedPendingOrderQty =
         input.selectedPendingComponentUsage.get(component.componentItemId)?.consumedQty ?? 0;
@@ -456,6 +582,9 @@ async function buildStockSnapshot(input: {
         reorderThresholdQty,
         pendingOrderReorderQty: Math.max(selectedPendingOrderQty - balanceQty, 0),
         balanceQty,
+        lastInwardDate,
+        lastInwardQty,
+        lastInwardUnit: lastInwardUnits.length === 1 ? lastInwardUnits[0] : null,
       };
     })
     .sort((left, right) => {

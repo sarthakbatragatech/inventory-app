@@ -7,7 +7,12 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export default async function BomPage() {
+export default async function BomPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ fgSku?: string }>;
+}) {
+  const requestedFgSku = (await searchParams).fgSku?.trim().toUpperCase() || '';
   const [catalogItems, bomModels, componentItems] = await Promise.all([
     listBomCatalogItems(),
     listBomModels(),
@@ -29,7 +34,9 @@ export default async function BomPage() {
   const catalogOptions = [...catalogBySku.values()].sort((left, right) =>
     left.fg_sku.localeCompare(right.fg_sku)
   );
-  const initialFgSku = bomModels[0]?.fg_sku ?? catalogOptions[0]?.fg_sku ?? '';
+  const initialFgSku = catalogOptions.some((item) => item.fg_sku === requestedFgSku)
+    ? requestedFgSku
+    : bomModels[0]?.fg_sku ?? catalogOptions[0]?.fg_sku ?? '';
   const catalogCount = catalogOptions.length;
   const modelCount = bomModels.length;
   const componentCount = componentItems.length;
@@ -51,7 +58,7 @@ export default async function BomPage() {
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
               <div className="rounded-2xl border border-neutral-200 bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                  Sales Models
+                  Portal Models
                 </div>
                 <div className="mt-1 text-2xl font-semibold text-neutral-950">{catalogCount}</div>
               </div>

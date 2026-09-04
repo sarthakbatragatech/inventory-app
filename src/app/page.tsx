@@ -17,6 +17,11 @@ const homeLinks = [
     description: 'Map finished-good models to the component SKUs they consume.',
   },
   {
+    href: '/production',
+    title: 'FR-Cruzer Production',
+    description: 'Record colour-wise output and compare stock capacity with sales and open orders.',
+  },
+  {
     href: '/stock',
     title: 'Stock',
     description: 'Review inventory, model-scoped BOM pressure, print preview, and current balance.',
@@ -35,7 +40,7 @@ export default function HomePage() {
         <div className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm sm:p-8 lg:p-10">
           <Brand />
           <p className="mt-6 max-w-5xl text-base leading-8 text-neutral-700 sm:text-lg">
-            SKU master, inward imports, searchable item history, and cleaner stock
+            SKU master, inward imports, BOMs, production reporting, and current stock
             visibility for the Tycoon workflow.
           </p>
 

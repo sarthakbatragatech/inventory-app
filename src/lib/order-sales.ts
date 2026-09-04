@@ -30,6 +30,12 @@ export type OrderPortalSalesRow = {
   qty: number;
 };
 
+export type OrderPortalCatalogItem = {
+  fg_sku: string;
+  fg_name: string | null;
+  source_item_id: string | null;
+};
+
 function normalizeModelKey(code: string | null, name: string | null) {
   const normalizedCode = code?.trim().toUpperCase() || '';
   if (normalizedCode) {
@@ -155,6 +161,51 @@ export async function listOrderPortalSalesCatalog() {
       fg_name: existing?.fg_name || row.fg_name,
       source_item_id: existing?.source_item_id || row.source_item_id,
     });
+  }
+
+  return [...deduped.values()].sort((left, right) => left.fg_sku.localeCompare(right.fg_sku));
+}
+
+export async function listOrderPortalItemCatalog() {
+  const supabaseOrder = getSupabaseOrderClient();
+  const deduped = new Map<string, OrderPortalCatalogItem>();
+
+  for (let from = 0; ; from += ORDER_SALES_PAGE_SIZE) {
+    const to = from + ORDER_SALES_PAGE_SIZE - 1;
+    const { data, error } = await supabaseOrder
+      .from('items')
+      .select('id, code, name, category, company')
+      .eq('company', 'Tycoon')
+      .order('name', { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      throw new Error(`Order portal item catalog fetch failed: ${error.message}`);
+    }
+
+    const rows = (data ?? []) as RawItem[];
+
+    for (const row of rows) {
+      if (row.category === 'spare') {
+        continue;
+      }
+
+      const modelKey = normalizeModelKey(row.code, row.name);
+      if (!modelKey) {
+        continue;
+      }
+
+      const existing = deduped.get(modelKey);
+      deduped.set(modelKey, {
+        fg_sku: modelKey,
+        fg_name: existing?.fg_name || row.name?.trim() || null,
+        source_item_id: existing?.source_item_id || row.id || null,
+      });
+    }
+
+    if (rows.length < ORDER_SALES_PAGE_SIZE) {
+      break;
+    }
   }
 
   return [...deduped.values()].sort((left, right) => left.fg_sku.localeCompare(right.fg_sku));

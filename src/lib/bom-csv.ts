@@ -9,6 +9,7 @@ export type BomCsvRow = {
   componentName: string;
   qtyPerFg: number;
   unit: string | null;
+  consumptionStage: 'assembled' | 'packed';
   notes: string | null;
 };
 
@@ -120,11 +121,13 @@ export function parseBomCsv(input: string) {
     );
 
     const componentSku = values.component_sku.trim().toUpperCase();
-    const componentName = values.component_name.trim();
+    const componentName = (values.component_name ?? '').trim();
     const qtyPerFg = Number(values.qty_per_fg.trim());
-    const unit = values.unit.trim() || null;
-    const notes = values.notes.trim() || null;
-    const sortOrderValue = values.sort_order.trim();
+    const unit = (values.unit ?? '').trim() || null;
+    const consumptionStageValue = (values.consumption_stage ?? '').trim().toLowerCase();
+    const consumptionStage = consumptionStageValue || 'assembled';
+    const notes = (values.notes ?? '').trim() || null;
+    const sortOrderValue = (values.sort_order ?? '').trim();
     const sortOrder = sortOrderValue ? Number(sortOrderValue) : index;
 
     if (!componentSku) {
@@ -139,12 +142,19 @@ export function parseBomCsv(input: string) {
       throw new Error(`Row ${index + 2} has an invalid sort_order.`);
     }
 
+    if (!['assembled', 'packed'].includes(consumptionStage)) {
+      throw new Error(
+        `Row ${index + 2} has an invalid consumption_stage. Use assembled or packed.`
+      );
+    }
+
     return {
       sortOrder,
       componentSku,
       componentName,
       qtyPerFg,
       unit,
+      consumptionStage: consumptionStage as 'assembled' | 'packed',
       notes,
     } satisfies BomCsvRow;
   });
@@ -173,6 +183,7 @@ export function serializeBomCsv(
     component_name: string;
     qty_per_fg: number;
     unit: string | null;
+    consumption_stage: 'assembled' | 'packed';
     notes: string | null;
   }>
 ) {
@@ -182,6 +193,7 @@ export function serializeBomCsv(
     'component_name',
     'qty_per_fg',
     'unit',
+    'consumption_stage',
     'notes',
   ];
 
@@ -194,6 +206,7 @@ export function serializeBomCsv(
         row.component_name,
         String(row.qty_per_fg),
         row.unit ?? '',
+        row.consumption_stage,
         row.notes ?? '',
       ]
         .map(escapeCsvCell)

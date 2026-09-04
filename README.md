@@ -1,6 +1,6 @@
 # Inventory App
 
-Next.js 16 inventory app for uploading inward stock from Excel, reviewing SKU totals, and inspecting inward history per item.
+Next.js 16 inventory app for uploading inward stock from Excel, managing BOMs, recording factory production, reviewing SKU totals, and inspecting inward history per item.
 
 ## Local Development
 
@@ -49,3 +49,6 @@ In Vercel:
 - Item detail pages include an inward history table and a Vega bar chart fed by `/api/items/[id]/chart`.
 - Supabase service-role access is used on the server, so `SUPABASE_SERVICE_ROLE_KEY` must only be configured in server environments.
 - Sales sync reads from a separate order-portal Supabase project, so `ORDER_SUPABASE_URL` plus either `ORDER_SUPABASE_SERVICE_ROLE_KEY` or `ORDER_SUPABASE_ANON_KEY` must be present anywhere `/api/sync-sales` runs.
+- `/production` is the FR-Cruzer control workspace: fitter-stage assembly consumes moulded/electrical BOM components, box-stage output consumes packing-stage components and becomes finished-goods stock, synced sales reduce that packed stock, and live pending order quantities drive the recommended build.
+- FR-Cruzer production is captured for Red-White, Aqua-Brown, White-Brown, and Military Green-Brown. Shared and colour-dependent BOM lines are tracked separately; sales remain model-level, so the app does not invent colour-wise finished-goods balances.
+- The inward importer prefers a sheet explicitly named `Inward`, maps the supplied FR-001 item-name and colour combinations to their seeded SKUs, and replaces overlapping history only for matching SKUs.

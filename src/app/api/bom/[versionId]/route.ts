@@ -10,6 +10,7 @@ type UpdateBomVersionRequest = {
     componentName?: string;
     qtyPerFg?: number;
     unit?: string | null;
+    consumptionStage?: 'assembled' | 'packed';
     notes?: string | null;
   }>;
 };
@@ -45,6 +46,7 @@ export async function PUT(
         componentName: line.componentName?.trim() ?? '',
         qtyPerFg: Number(line.qtyPerFg),
         unit: line.unit?.trim() || null,
+        consumptionStage: line.consumptionStage === 'packed' ? 'packed' : 'assembled',
         notes: line.notes?.trim() || null,
       })),
     });

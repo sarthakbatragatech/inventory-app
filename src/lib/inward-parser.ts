@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import readExcelFile, { type SheetData } from 'read-excel-file/node';
 import { normalizeItemName } from './sku-normalizer';
 
 export type ParsedInwardRow = {
@@ -49,14 +49,23 @@ function formatDateParts(year: number, month: number, day: number): string {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+function excelSerialToDate(value: number) {
+  const excelEpoch = Date.UTC(1899, 11, 30);
+  return new Date(excelEpoch + Math.floor(value) * 86_400_000);
+}
+
 function toIsoDate(value: unknown): string | null {
   if (value === null || value === undefined || value === '') return null;
 
   if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (!parsed) return null;
+    const parsed = excelSerialToDate(value);
+    if (isNaN(parsed.getTime())) return null;
 
-    return formatDateParts(parsed.y, parsed.m, parsed.d);
+    return formatDateParts(
+      parsed.getUTCFullYear(),
+      parsed.getUTCMonth() + 1,
+      parsed.getUTCDate()
+    );
   }
 
   if (value instanceof Date && !isNaN(value.getTime())) {
@@ -109,15 +118,37 @@ function parseQuantity(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function parseWorksheet(
-  worksheet: XLSX.WorkSheet
-): ParsedInwardRow[] {
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-    defval: null,
-    raw: true,
-  });
+function sheetDataToRows(data: SheetData) {
+  if (data.length < 1) {
+    return [] as Record<string, unknown>[];
+  }
 
-  return rows
+  const headerByColumn = new Map<number, string>();
+
+  for (let column = 0; column < data[0].length; column += 1) {
+    const header = String(data[0][column] ?? '').trim();
+    if (header) {
+      headerByColumn.set(column, header);
+    }
+  }
+
+  const rows: Record<string, unknown>[] = [];
+  for (let rowIndex = 1; rowIndex < data.length; rowIndex += 1) {
+    const sheetRow = data[rowIndex];
+    const row: Record<string, unknown> = {};
+
+    for (const [column, header] of headerByColumn) {
+      row[header] = sheetRow[column] ?? null;
+    }
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function parseSheetData(data: SheetData): ParsedInwardRow[] {
+  return sheetDataToRows(data)
     .map((row, index) => {
       const rawItemName = String(getRowValue(row, ITEM_NAME_KEYS) ?? '').trim();
 
@@ -133,10 +164,16 @@ function parseWorksheet(
           ? 'PCS'
           : kgQuantity !== null
             ? 'KGS'
-            : (rawUnit as string | null);
+            : rawUnit === null || rawUnit === undefined
+              ? null
+              : String(rawUnit);
 
       const inwardDate = toIsoDate(getRowValue(row, DATE_KEYS));
-      const color = getRowValue(row, COLOR_KEYS) as string | null;
+      const rawColor = getRowValue(row, COLOR_KEYS);
+      const color =
+        rawColor === null || rawColor === undefined || rawColor === ''
+          ? null
+          : String(rawColor);
 
       return {
         rawRowNo: index + 2,
@@ -153,7 +190,9 @@ function parseWorksheet(
 }
 
 function scoreParsedRows(rows: ParsedInwardRow[]) {
-  const headerKeys = new Set(rows.flatMap((row) => Object.keys(row.rawPayload).map(normalizeHeaderKey)));
+  const headerKeys = new Set(
+    rows.flatMap((row) => Object.keys(row.rawPayload).map(normalizeHeaderKey))
+  );
   const rowsWithQuantity = rows.filter((row) => row.quantity !== null).length;
   const rowsWithDate = rows.filter((row) => row.inwardDate !== null).length;
   const rowsWithQuantityAndDate = rows.filter(
@@ -178,24 +217,38 @@ function scoreParsedRows(rows: ParsedInwardRow[]) {
   );
 }
 
-export function parseInwardWorkbook(buffer: Buffer): ParsedInwardRow[] {
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
-  const parsedSheets = workbook.SheetNames.map((sheetName) => ({
-    sheetName,
-    rows: parseWorksheet(workbook.Sheets[sheetName]),
-  })).filter((sheet) => sheet.rows.length > 0);
+function scoreSheetName(sheetName: string) {
+  const normalizedName = sheetName.trim().toLowerCase();
+  if (normalizedName === 'inward') {
+    return 1_000_000;
+  }
+
+  return normalizedName.includes('inward') ? 500_000 : 0;
+}
+
+export async function parseInwardWorkbook(buffer: Buffer): Promise<ParsedInwardRow[]> {
+  const workbookSheets = await readExcelFile(buffer);
+  const parsedSheets = workbookSheets
+    .map((sheet) => ({
+      sheetName: sheet.sheet,
+      rows: parseSheetData(sheet.data),
+    }))
+    .filter((sheet) => sheet.rows.length > 0);
 
   if (!parsedSheets.length) {
     return [];
   }
 
   parsedSheets.sort((left, right) => {
-    const scoreDelta = scoreParsedRows(right.rows) - scoreParsedRows(left.rows);
+    const scoreDelta =
+      scoreSheetName(right.sheetName) + scoreParsedRows(right.rows) -
+      (scoreSheetName(left.sheetName) + scoreParsedRows(left.rows));
     if (scoreDelta !== 0) {
       return scoreDelta;
     }
 
-    return workbook.SheetNames.indexOf(left.sheetName) - workbook.SheetNames.indexOf(right.sheetName);
+    return workbookSheets.findIndex((sheet) => sheet.sheet === left.sheetName) -
+      workbookSheets.findIndex((sheet) => sheet.sheet === right.sheetName);
   });
 
   return parsedSheets[0].rows;

@@ -14,6 +14,12 @@ type AliasRecord = {
   item_id: string;
 };
 
+type ItemInwardMappingRecord = {
+  normalized_item_name: string;
+  color: string;
+  item_id: string;
+};
+
 type ItemRecord = {
   id: string;
   sku?: string;
@@ -37,6 +43,14 @@ type BatchRowRecord = {
 
 function normalizedComparisonKey(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function normalizedColorKey(value: string | null): string {
+  return value?.trim().replace(/\s+/g, ' ').toUpperCase() ?? '';
+}
+
+function inwardMappingKey(itemName: string, color: string | null): string {
+  return `${normalizedComparisonKey(itemName)}::${normalizedColorKey(color)}`;
 }
 
 function chunkArray<T>(values: T[], chunkSize: number): T[][] {
@@ -232,6 +246,29 @@ async function fetchItems(normalizedItemNames: string[]) {
   return items;
 }
 
+async function fetchItemInwardMappings(normalizedItemNames: string[]) {
+  const supabase = getSupabaseServerClient();
+  const mappings: ItemInwardMappingRecord[] = [];
+
+  for (const chunk of chunkArray(normalizedItemNames, QUERY_CHUNK_SIZE)) {
+    const candidates = [
+      ...new Set(chunk.flatMap((name) => [name, name.toUpperCase(), name.toLowerCase()])),
+    ];
+    const { data, error } = await supabase
+      .from('item_inward_mappings')
+      .select('normalized_item_name, color, item_id')
+      .in('normalized_item_name', candidates);
+
+    if (error) {
+      throw new Error(`Colour-aware item mapping lookup failed: ${error.message}`);
+    }
+
+    mappings.push(...((data ?? []) as ItemInwardMappingRecord[]));
+  }
+
+  return mappings;
+}
+
 async function fetchItemFamilyCodes() {
   const supabase = getSupabaseServerClient();
   const { data, error } = await supabase
@@ -340,6 +377,7 @@ async function upsertAliases(aliasRows: Array<{ alias: string; item_id: string }
 async function insertImportRows(
   batchId: string,
   parsedRows: ParsedInwardRow[],
+  itemIdByInwardMapping: Map<string, string>,
   itemIdByRawName: Map<string, string>,
   itemIdByNormalizedName: Map<string, string>
 ) {
@@ -347,6 +385,9 @@ async function insertImportRows(
 
   const payload = parsedRows.flatMap((row) => {
     const itemId =
+      itemIdByInwardMapping.get(
+        inwardMappingKey(row.normalizedItemName, row.color)
+      ) ??
       itemIdByRawName.get(row.rawItemName) ??
       itemIdByNormalizedName.get(
         normalizedComparisonKey(row.normalizedItemName)
@@ -380,11 +421,17 @@ async function insertImportRows(
     }
   }
 
-  return payload.length;
+  return {
+    rowCount: payload.length,
+    itemIds: [...new Set(payload.map((row) => row.item_id))],
+  };
 }
 
-async function findProcessedBatchesWithOverlappingDates(inwardDates: string[]) {
-  if (!inwardDates.length) {
+async function findProcessedBatchesWithOverlappingDates(
+  inwardDates: string[],
+  itemIds: string[]
+) {
+  if (!inwardDates.length || !itemIds.length) {
     return [] as string[];
   }
 
@@ -392,17 +439,20 @@ async function findProcessedBatchesWithOverlappingDates(inwardDates: string[]) {
   const overlappingBatchIds = new Set<string>();
 
   for (const dateChunk of chunkArray(inwardDates, QUERY_CHUNK_SIZE)) {
-    const { data, error } = await supabase
-      .from('import_batch_rows')
-      .select('batch_id')
-      .in('inward_date', dateChunk);
+    for (const itemChunk of chunkArray(itemIds, QUERY_CHUNK_SIZE)) {
+      const { data, error } = await supabase
+        .from('import_batch_rows')
+        .select('batch_id')
+        .in('inward_date', dateChunk)
+        .in('item_id', itemChunk);
 
-    if (error) {
-      throw new Error(`Overlapping inward-date lookup failed: ${error.message}`);
-    }
+      if (error) {
+        throw new Error(`Overlapping inward-date lookup failed: ${error.message}`);
+      }
 
-    for (const row of (data ?? []) as BatchRowRecord[]) {
-      overlappingBatchIds.add(row.batch_id);
+      for (const row of (data ?? []) as BatchRowRecord[]) {
+        overlappingBatchIds.add(row.batch_id);
+      }
     }
   }
 
@@ -433,9 +483,10 @@ async function findProcessedBatchesWithOverlappingDates(inwardDates: string[]) {
 
 async function deleteOverlappingProcessedRows(
   batchIds: string[],
-  inwardDates: string[]
+  inwardDates: string[],
+  itemIds: string[]
 ) {
-  if (!batchIds.length || !inwardDates.length) {
+  if (!batchIds.length || !inwardDates.length || !itemIds.length) {
     return 0;
   }
 
@@ -444,18 +495,21 @@ async function deleteOverlappingProcessedRows(
 
   for (const batchChunk of chunkArray(batchIds, QUERY_CHUNK_SIZE)) {
     for (const dateChunk of chunkArray(inwardDates, QUERY_CHUNK_SIZE)) {
-      const { data, error } = await supabase
-        .from('import_batch_rows')
-        .delete()
-        .in('batch_id', batchChunk)
-        .in('inward_date', dateChunk)
-        .select('batch_id');
+      for (const itemChunk of chunkArray(itemIds, QUERY_CHUNK_SIZE)) {
+        const { data, error } = await supabase
+          .from('import_batch_rows')
+          .delete()
+          .in('batch_id', batchChunk)
+          .in('inward_date', dateChunk)
+          .in('item_id', itemChunk)
+          .select('batch_id');
 
-      if (error) {
-        throw new Error(`Overlapping inward row cleanup failed: ${error.message}`);
+        if (error) {
+          throw new Error(`Overlapping inward row cleanup failed: ${error.message}`);
+        }
+
+        deletedRowCount += (data ?? []).length;
       }
-
-      deletedRowCount += (data ?? []).length;
     }
   }
 
@@ -532,7 +586,7 @@ export async function POST(req: NextRequest) {
 
     const bytes = await fileEntry.arrayBuffer();
     const parsedRows = normalizeParsedRowQuantities(
-      parseInwardWorkbook(Buffer.from(bytes))
+      await parseInwardWorkbook(Buffer.from(bytes))
     );
 
     const { data: batch, error: batchError } = await supabase
@@ -571,9 +625,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const aliasRecords = await fetchAliases(uniqueRawItemNames);
-    const itemRecords = await fetchItems(uniqueNormalizedItemNames);
-    const validFamilyCodes = await fetchItemFamilyCodes();
+    const [aliasRecords, itemRecords, inwardMappingRecords, validFamilyCodes] =
+      await Promise.all([
+        fetchAliases(uniqueRawItemNames),
+        fetchItems(uniqueNormalizedItemNames),
+        fetchItemInwardMappings(uniqueNormalizedItemNames),
+        fetchItemFamilyCodes(),
+      ]);
 
     const itemIdByRawName = new Map(
       aliasRecords.map((record) => [record.alias, record.item_id])
@@ -584,10 +642,30 @@ export async function POST(req: NextRequest) {
         record.id,
       ])
     );
+    const itemIdByInwardMapping = new Map(
+      inwardMappingRecords.map((record) => [
+        inwardMappingKey(record.normalized_item_name, record.color),
+        record.item_id,
+      ])
+    );
 
     const missingNormalizedItemNames = uniqueNormalizedItemNames.filter(
-      (normalizedItemName) =>
-        !itemIdByNormalizedName.has(normalizedComparisonKey(normalizedItemName))
+      (normalizedItemName) => {
+        if (itemIdByNormalizedName.has(normalizedComparisonKey(normalizedItemName))) {
+          return false;
+        }
+
+        const matchingRows = parsedRows.filter(
+          (row) =>
+            normalizedComparisonKey(row.normalizedItemName) ===
+            normalizedComparisonKey(normalizedItemName)
+        );
+        return !matchingRows.every((row) =>
+          itemIdByInwardMapping.has(
+            inwardMappingKey(row.normalizedItemName, row.color)
+          )
+        );
+      }
     );
 
     const insertedItems = await insertMissingItems(
@@ -628,9 +706,10 @@ export async function POST(req: NextRequest) {
 
     await upsertAliases(aliasRows);
 
-    const insertedRowCount = await insertImportRows(
+    const insertedRows = await insertImportRows(
       currentBatchId,
       parsedRows,
+      itemIdByInwardMapping,
       itemIdByRawName,
       itemIdByNormalizedName
     );
@@ -639,11 +718,15 @@ export async function POST(req: NextRequest) {
       ...new Set(parsedRows.map((row) => row.inwardDate).filter((value): value is string => Boolean(value))),
     ];
     const overlappingProcessedBatchIds = (
-      await findProcessedBatchesWithOverlappingDates(incomingInwardDates)
+      await findProcessedBatchesWithOverlappingDates(
+        incomingInwardDates,
+        insertedRows.itemIds
+      )
     ).filter((existingBatchId) => existingBatchId !== currentBatchId);
     const overwrittenRowCount = await deleteOverlappingProcessedRows(
       overlappingProcessedBatchIds,
-      incomingInwardDates
+      incomingInwardDates,
+      insertedRows.itemIds
     );
 
     const { error: batchUpdateError } = await supabase
@@ -660,7 +743,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       batchId: currentBatchId,
-      rowsImported: insertedRowCount,
+      rowsImported: insertedRows.rowCount,
       uniqueItemsMatched: uniqueNormalizedItemNames.length,
       newItemsCreated: insertedItems.length,
       newItems: insertedItems.map((item) => ({

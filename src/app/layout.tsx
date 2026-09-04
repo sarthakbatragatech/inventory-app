@@ -53,6 +53,12 @@ export default function RootLayout({
                 BOM
               </Link>
               <Link
+                href="/production"
+                className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-emerald-100 hover:text-emerald-950"
+              >
+                Production
+              </Link>
+              <Link
                 href="/stock"
                 className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-emerald-100 hover:text-emerald-950"
               >

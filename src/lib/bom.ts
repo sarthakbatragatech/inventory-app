@@ -1,5 +1,8 @@
 import { getSupabaseInventoryServerClient } from '@/lib/supabase';
-import { listOrderPortalSalesCatalog } from '@/lib/order-sales';
+import {
+  listOrderPortalItemCatalog,
+  listOrderPortalSalesCatalog,
+} from '@/lib/order-sales';
 
 export type BomModelSummary = {
   id: string;
@@ -19,6 +22,8 @@ export type BomVersionRecord = {
   created_at: string;
 };
 
+export type ConsumptionStage = 'assembled' | 'packed';
+
 export type BomLineRecord = {
   id: string;
   bom_version_id: string;
@@ -28,12 +33,18 @@ export type BomLineRecord = {
   qty_per_fg: number;
   unit: string | null;
   sort_order: number;
+  consumption_stage: ConsumptionStage;
   notes: string | null;
   created_at: string;
 };
 
+export type BomVariantLineRecord = Omit<BomLineRecord, 'consumption_stage'> & {
+  color_variant: string;
+};
+
 export type BomVersionDetail = BomVersionRecord & {
   lines: BomLineRecord[];
+  variantLines: BomVariantLineRecord[];
 };
 
 export type BomDetail = {
@@ -67,6 +78,7 @@ export type BomVersionLineInput = {
   componentName: string;
   qtyPerFg: number;
   unit: string | null;
+  consumptionStage: ConsumptionStage;
   notes: string | null;
 };
 
@@ -119,27 +131,52 @@ export async function getBomDetailBySku(fgSku: string) {
   const versionList = (versions ?? []) as BomVersionRecord[];
   const versionIds = versionList.map((version) => version.id);
   let linesByVersionId = new Map<string, BomLineRecord[]>();
+  let variantLinesByVersionId = new Map<string, BomVariantLineRecord[]>();
 
   if (versionIds.length > 0) {
-    const { data: lines, error: lineError } = await supabase
-      .from('bom_lines')
-      .select(
-        'id, bom_version_id, component_item_id, component_sku, component_name, qty_per_fg, unit, sort_order, notes, created_at'
-      )
-      .in('bom_version_id', versionIds)
-      .order('sort_order', { ascending: true })
-      .order('component_sku', { ascending: true });
+    const [commonResult, variantResult] = await Promise.all([
+      supabase
+        .from('bom_lines')
+        .select(
+          'id, bom_version_id, component_item_id, component_sku, component_name, qty_per_fg, unit, sort_order, consumption_stage, notes, created_at'
+        )
+        .in('bom_version_id', versionIds)
+        .order('sort_order', { ascending: true })
+        .order('component_sku', { ascending: true }),
+      supabase
+        .from('bom_variant_lines')
+        .select(
+          'id, bom_version_id, color_variant, component_item_id, component_sku, component_name, qty_per_fg, unit, sort_order, notes, created_at'
+        )
+        .in('bom_version_id', versionIds)
+        .order('color_variant', { ascending: true })
+        .order('sort_order', { ascending: true })
+        .order('component_sku', { ascending: true }),
+    ]);
 
-    if (lineError) {
-      throw new Error(`Failed to load BOM lines: ${lineError.message}`);
+    if (commonResult.error) {
+      throw new Error(`Failed to load BOM lines: ${commonResult.error.message}`);
     }
 
-    linesByVersionId = ((lines ?? []) as BomLineRecord[]).reduce((map, line) => {
+    if (variantResult.error) {
+      throw new Error(`Failed to load colour BOM lines: ${variantResult.error.message}`);
+    }
+
+    linesByVersionId = ((commonResult.data ?? []) as BomLineRecord[]).reduce((map, line) => {
       const existing = map.get(line.bom_version_id) ?? [];
       existing.push(line);
       map.set(line.bom_version_id, existing);
       return map;
     }, new Map<string, BomLineRecord[]>());
+
+    variantLinesByVersionId = (
+      (variantResult.data ?? []) as BomVariantLineRecord[]
+    ).reduce((map, line) => {
+      const existing = map.get(line.bom_version_id) ?? [];
+      existing.push(line);
+      map.set(line.bom_version_id, existing);
+      return map;
+    }, new Map<string, BomVariantLineRecord[]>());
   }
 
   return {
@@ -147,6 +184,7 @@ export async function getBomDetailBySku(fgSku: string) {
     versions: versionList.map((version) => ({
       ...version,
       lines: linesByVersionId.get(version.id) ?? [],
+      variantLines: variantLinesByVersionId.get(version.id) ?? [],
     })),
   } satisfies BomDetail;
 }
@@ -176,7 +214,7 @@ export async function getBomVersionById(versionId: string) {
   const { data: lines, error: lineError } = await supabase
     .from('bom_lines')
     .select(
-      'id, bom_version_id, component_item_id, component_sku, component_name, qty_per_fg, unit, sort_order, notes, created_at'
+      'id, bom_version_id, component_item_id, component_sku, component_name, qty_per_fg, unit, sort_order, consumption_stage, notes, created_at'
     )
     .eq('bom_version_id', versionId)
     .order('sort_order', { ascending: true })
@@ -218,6 +256,7 @@ export async function saveBomVersion(
     qty_per_fg: Number(line.qtyPerFg),
     unit: line.unit?.trim() || null,
     sort_order: index,
+    consumption_stage: line.consumptionStage,
     notes: line.notes?.trim() || null,
   }));
 
@@ -227,7 +266,8 @@ export async function saveBomVersion(
       !line.component_sku ||
       !line.component_name ||
       !Number.isFinite(line.qty_per_fg) ||
-      line.qty_per_fg <= 0
+      line.qty_per_fg <= 0 ||
+      !['assembled', 'packed'].includes(line.consumption_stage)
   );
 
   if (invalidLine) {
@@ -294,7 +334,7 @@ export async function listComponentItems() {
 export async function listBomCatalogItems() {
   const deduped = new Map<string, BomCatalogItem>();
   try {
-    const orderPortalCatalog = await listOrderPortalSalesCatalog();
+    const orderPortalCatalog = await listOrderPortalItemCatalog();
 
     for (const row of orderPortalCatalog) {
       deduped.set(row.fg_sku, row);
@@ -302,7 +342,24 @@ export async function listBomCatalogItems() {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Unknown order portal catalog error';
-    console.error('Failed to load order portal sales catalog for BOMs:', message);
+    console.error('Failed to load order portal item catalog for BOMs:', message);
+  }
+
+  try {
+    const salesCatalog = await listOrderPortalSalesCatalog();
+
+    for (const row of salesCatalog) {
+      const existing = deduped.get(row.fg_sku);
+      deduped.set(row.fg_sku, {
+        fg_sku: row.fg_sku,
+        fg_name: existing?.fg_name || row.fg_name,
+        source_item_id: existing?.source_item_id || row.source_item_id,
+      });
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unknown order portal sales catalog error';
+    console.error('Failed to load order portal sales history for BOMs:', message);
   }
 
   const inventorySupabase = getSupabaseInventoryServerClient();

@@ -70,6 +70,7 @@ export async function POST(
           componentName: row.componentName || item.item_name,
           qtyPerFg: row.qtyPerFg,
           unit: row.unit || item.default_unit || null,
+          consumptionStage: row.consumptionStage,
           notes: row.notes,
         };
       }),

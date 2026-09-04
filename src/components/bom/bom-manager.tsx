@@ -25,6 +25,7 @@ type BomLine = {
   qty_per_fg: number;
   unit: string | null;
   sort_order: number;
+  consumption_stage: 'assembled' | 'packed';
   notes: string | null;
   created_at: string;
 };
@@ -37,6 +38,7 @@ type BomVersion = {
   notes: string | null;
   created_at: string;
   lines: BomLine[];
+  variantLines: Array<BomLine & { color_variant: string }>;
 };
 
 type BomDetail = {
@@ -58,6 +60,7 @@ type EditableLine = {
   componentName: string;
   qtyPerFg: string;
   unit: string;
+  consumptionStage: 'assembled' | 'packed';
   notes: string;
 };
 
@@ -67,7 +70,7 @@ type Props = {
   initialFgSku: string;
 };
 
-const DEFAULT_BOM_EFFECTIVE_FROM = '2025-11-01';
+const DEFAULT_BOM_EFFECTIVE_FROM = new Date().toISOString().slice(0, 10);
 
 function buildEmptyLine(): EditableLine {
   return {
@@ -77,6 +80,7 @@ function buildEmptyLine(): EditableLine {
     componentName: '',
     qtyPerFg: '',
     unit: '',
+    consumptionStage: 'assembled',
     notes: '',
   };
 }
@@ -89,6 +93,7 @@ function buildEditableLine(line: BomLine): EditableLine {
     componentName: line.component_name,
     qtyPerFg: String(line.qty_per_fg),
     unit: line.unit ?? '',
+    consumptionStage: line.consumption_stage === 'packed' ? 'packed' : 'assembled',
     notes: line.notes ?? '',
   };
 }
@@ -143,6 +148,7 @@ export function BomManager({
   const selectedModelName = selectedCatalog?.fg_name || detail?.model.fg_name || 'No BOM yet';
   const versionCount = detail?.versions.length ?? 0;
   const selectedLineCount = lines.length;
+  const selectedVariantLineCount = selectedVersion?.variantLines.length ?? 0;
 
   function resetEditorState() {
     setDetail(null);
@@ -287,6 +293,7 @@ export function BomManager({
             componentName: line.componentName,
             qtyPerFg: Number(line.qtyPerFg),
             unit: line.unit || null,
+            consumptionStage: line.consumptionStage,
             notes: line.notes || null,
           })),
         }),
@@ -426,7 +433,7 @@ export function BomManager({
                 </h2>
                 <div className="mt-2 text-sm text-neutral-600">
                   {selectedFgSku
-                    ? `${selectedModelName} · ${selectedLineCount} line${selectedLineCount === 1 ? '' : 's'} · ${versionCount} version${versionCount === 1 ? '' : 's'}`
+                    ? `${selectedModelName} · ${selectedLineCount} shared line${selectedLineCount === 1 ? '' : 's'}${selectedVariantLineCount ? ` + ${selectedVariantLineCount} colour lines` : ''} · ${versionCount} version${versionCount === 1 ? '' : 's'}`
                     : 'Choose a finished-good SKU to begin.'}
                 </div>
               </div>
@@ -530,7 +537,7 @@ export function BomManager({
                             : 'bg-neutral-100 text-neutral-600'
                         }`}
                       >
-                        {version.lines.length}
+                        {version.lines.length + version.variantLines.length}
                       </div>
                     </div>
                     <div
@@ -538,7 +545,10 @@ export function BomManager({
                         version.id === selectedVersionId ? 'text-neutral-200' : 'text-neutral-500'
                       }`}
                     >
-                      {version.lines.length} component{version.lines.length === 1 ? '' : 's'}
+                      {version.lines.length} shared
+                      {version.variantLines.length
+                        ? ` + ${version.variantLines.length} colour-dependent`
+                        : ''}
                     </div>
                   </button>
                 ))
@@ -625,6 +635,14 @@ export function BomManager({
           </div>
         ) : null}
 
+        {selectedFgSku === 'FR-CRUZER' && selectedVariantLineCount > 0 ? (
+          <div className="mx-5 mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-900 sm:mx-6">
+            This editor shows the shared FR-Cruzer components. The {selectedVariantLineCount}
+            colour-dependent plastic lines from the supplied planning sheets are preserved and
+            used automatically on the Production screen.
+          </div>
+        ) : null}
+
         {!selectedVersionId ? (
           <div className="m-5 rounded-3xl border border-dashed border-neutral-300 bg-neutral-50 px-6 py-10 text-sm text-neutral-500 sm:m-6">
             Select a model and create a BOM version before editing component lines.
@@ -639,6 +657,7 @@ export function BomManager({
                   <th className="px-3 py-3">Item</th>
                   <th className="px-3 py-3">Qty / FG</th>
                   <th className="px-3 py-3">Unit</th>
+                  <th className="px-3 py-3">Consumed at</th>
                   <th className="px-3 py-3">Notes</th>
                   <th className="px-3 py-3" />
                 </tr>
@@ -708,6 +727,18 @@ export function BomManager({
                         />
                       </td>
                       <td className="px-3 py-3">
+                        <select
+                          value={line.consumptionStage}
+                          onChange={(event) =>
+                            updateLine(index, 'consumptionStage', event.target.value)
+                          }
+                          className="w-32 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 shadow-sm"
+                        >
+                          <option value="assembled">Assembled</option>
+                          <option value="packed">Packed</option>
+                        </select>
+                      </td>
+                      <td className="px-3 py-3">
                         <input
                           type="text"
                           value={line.notes}
@@ -728,7 +759,7 @@ export function BomManager({
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-3 py-10 text-center text-sm text-neutral-500">
+                    <td colSpan={7} className="px-3 py-10 text-center text-sm text-neutral-500">
                       No component lines yet. Add the first BOM row for this version.
                     </td>
                   </tr>
