@@ -61,6 +61,8 @@ const FR_CRUZER_COMPONENT_PHOTOS: Record<string, string> = {
   'FR001-BACKREST-PIPE': '/components/fr-cruzer/fr001-backrest-pipe.webp',
   'FR001-DRIVE-MOTOR': '/components/fr-cruzer/fr001-drive-motor.webp',
   'FR001-HANDLE-GRIP': '/components/fr-cruzer/fr001-handle-grip.webp',
+  'FR001-MOTOR': '/components/fr-cruzer/fr001-drive-motor.webp',
+  'FR001-MUSIC-BOARD': '/components/fr-cruzer/fr001-mp3.webp',
   'FR001-MP3': '/components/fr-cruzer/fr001-mp3.webp',
   'FR001-OUTER': '/components/fr-cruzer/fr001-outer.webp',
 };
