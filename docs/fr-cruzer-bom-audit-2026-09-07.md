@@ -1,16 +1,19 @@
 # FR-Cruzer BOM audit — 7 September 2026
 
-The existing BOM is a useful planning model, but it is not yet a signed-off manufacturing specification. Source photographs and lot weights support several kit definitions and expose a handle-grip unit error. Wheel-half quantities and their consumption stage need factory confirmation. This audit does not change BOM records, stock, or production entries.
+The existing BOM is a useful planning model, but it is not yet a signed-off manufacturing specification. Source photographs and lot weights support several kit definitions and expose a handle-grip unit error. Wheel-half quantities and their consumption stage need factory confirmation. The initial audit was read-only. In the subsequent user-approved correction, the quantity for 2137 wheel rings is six per bike for every colour, retaining the assembly consumption stage.
+
+The user has explicitly confirmed **6 pcs of 2137 wheel rings per bike**. This supersedes the initial three-ring estimate from planning weights. Three rings is no longer an open quantity candidate. The separate question about three big and three small **2141 wheel halves** remains unresolved.
 
 ## Sources and scope
 
-- Live `GET /api/bom?fgSku=FR-CRUZER`: BOM version 1, effective 13 July 2026; 32 shared lines and six lines per colour. Apart from two backrest pipes, all current quantities are one.
+- Initial live `GET /api/bom?fgSku=FR-CRUZER` snapshot: BOM version 1, effective 13 July 2026; 32 shared lines and six lines per colour. Apart from two backrest pipes, all quantities were one before the six-ring correction.
 - Live `GET /api/production?fgSku=FR-CRUZER`, calculated at 02:02 IST on 7 September 2026: 1,802 assembled bikes, 1,362 packed bikes, and 1,139 further bikes requiring packing for open orders.
 - `CRUSIER BIKE MOULDS.xlsx`: `Item List`, `Inward`, and `Production` sheets, including embedded component photographs.
 - `FR-001 Cruzer Stock Report.xlsx`: `Planning` and `Report` sheets, used to cross-check lot quantities and weights.
 - `FIPL Stock Entry Final 20072026.xlsx`: `Cruzer` planning sheet.
 - `FR-CRUZER/DUMP` product photographs, including image groups 5860/5861 and 5844/5855.
 - User confirmation that two BackRest Supporter Pipes are used in one bike.
+- Subsequent user confirmation that six 2137 wheel rings are used in one bike, superseding the initial photo/weight estimate.
 
 Photographs establish what is visible and help interpret a counted kit. They do not establish hidden components, the factory's stock-count convention, or the point when a part is issued to production. Matching a photographed kit weight to an inward lot average is supporting evidence, not manufacturing sign-off.
 
@@ -30,11 +33,11 @@ The workbook itself does not contain a finished-colour-to-position matrix. `Prod
 
 ## Quantity and unit findings
 
-| Component | Current BOM | Evidence and confidence | Action to confirm |
+| Component | BOM setting at audit / follow-up | Evidence and confidence | Action to confirm |
 | --- | --- | --- | --- |
 | Handle grip | 1 set, consumed at packing | **Strong correction candidate: 2 individual pieces.** `Inward!D78:G78` records 7,250 pieces at 177.62 kg, or 24.499 g each. The grip photograph shows two grips together weighing 49 g. The portal currently treats the unconverted 7,250-piece inward count as 7,250 sets. | Confirm the inward count means individual grips, then use 2 pcs/bike or explicitly convert all receipt quantities to two-grip sets. Retain the agreed packing stage unless the factory corrects it. |
 | 2141 wheel big and wheel small | 1 pc of each, consumed at assembly | **Strong correction candidate: 3 big halves and 3 small halves.** The two photographs show complementary wheel shells. `Item List!U20 = MIN($L$31:$L$32)` and `X20 = (U20/3)-W20` explicitly divide matching halves by three. Receipts identify the halves separately; examples are `Inward!D34:G37`. | Confirm three of each per bike. Also confirm the stage: `Item List!W20 = Production!L2` uses packed bikes, while the portal consumes these parts at assembly. Quantity and stage must be settled together. |
-| 2137 wheel shroud / ring | 1 pc per applicable colour, consumed at assembly | **Review candidate: 3 rings.** Embedded photographs at `Item List!A25:A26` show a single ring weighing about 13 g. Measured receipts `Inward!D61:G61`, `D64:G64`, `D67:G67`, and `D70:G70` average about 15 g per piece. Planning weights `Item List!C25:C26` and `Planning!E25:E26` are 44 g. Three rings are consistent with the per-bike material estimate and three-wheel construction, but weight alone does not prove usage. | Count rings on one completed bike and confirm whether their issue stage follows wheel fitting or packing. Do not multiply stock usage from the weight ratio alone. |
+| 2137 wheel shroud / ring | **Follow-up correction: 6 pcs per bike**, consumed at assembly; previously 1 pc | **Quantity confirmed by the user: six rings.** This applies to the red ring for Red-White and the brown ring for Aqua-Brown, White-Brown and Military Green-Brown. For historical context, photographs at `Item List!A25:A26` show a single ring weighing about 13 g; receipts `Inward!D61:G61`, `D64:G64`, `D67:G67`, and `D70:G70` average about 15 g per piece, while planning weights `Item List!C25:C26` and `Planning!E25:E26` are 44 g. That discrepancy prompted an initial three-ring candidate, which the user's direct six-ring confirmation supersedes. | Use six individual rings in all four colour BOMs. Retain the existing assembly stage; there is no remaining three-versus-six quantity question. |
 | 2136 wheel cover | 1 pc per applicable colour, consumed at assembly | **One kit is supported; do not multiply by three.** The blue and white photographs at `Item List!A21` and `A23` show a ten-piece kit weighing about 65 g in total. `Inward!D56:G56`, `D62:G62`, `D65:G66` also average about 65 g per counted receipt unit. | Clarify the label as one moulded kit and confirm its ten-piece contents. The receipt count already appears to count the whole kit. |
 | 2131 rearview mirror | 1 set, consumed at assembly | **One set is supported.** The photograph shows the moulded halves for the mirror pair, together weighing 76 g. `Inward!D59:G59` and `D92:G92` average about 76 g per receipt unit. | Confirm one receipt unit means a complete mirror pair; retain one set if confirmed. |
 | 2122 front and rear covers | 1 set, consumed at assembly | **One set is supported.** The photographed front/rear pair weighs 161 g; `FR-001 Cruzer Stock Report.xlsx`, `Report!D3:F3`, gives 493.75 kg / 3,067 = about 160.988 g per counted unit. | Confirm that each receipt count is the complete front/rear cover set. |
@@ -47,7 +50,7 @@ The other shared rows are currently one each: body right, body left, seat, backr
 
 ## Planning effect of the principal candidates
 
-These are comparison calculations, not changes to the live ledger. They use the snapshot above and do not account for additional unrecorded receipts, scrap, returns, or physical adjustments.
+These are comparison calculations for the still-unconfirmed grip and wheel-half candidates, not changes to those live ledger calculations. They use the initial snapshot above, which predates the confirmed six-ring correction, and do not account for additional unrecorded receipts, scrap, returns, or physical adjustments.
 
 | Case | Computation | Result |
 | --- | --- | --- |

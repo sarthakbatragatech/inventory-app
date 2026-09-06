@@ -23,13 +23,6 @@ const quantityChecks = [
     check: 'Confirm 3 big + 3 small halves per bike, and whether they should be consumed at packing rather than assembly.',
     evidence: 'The bike has three wheels. Excel divides the matched wheel stock by three and deducts packed production.',
   },
-  {
-    part: 'Wheel shroud rings · 2137',
-    sku: 'FR001-2137-BROWN / RED',
-    current: '1 ring · assembly',
-    check: 'Confirm 3 rings per bike, including whether any wheel needs a ring on both sides.',
-    evidence: 'The source photo shows one ring at about 13 g. Coloured rings are visible on all three wheels.',
-  },
 ] as const;
 
 export function ProductionBomReference() {
@@ -59,8 +52,13 @@ export function ProductionBomReference() {
         <span className={s.source}>Evidence: Dump / IMG_5860, IMG_5861, IMG_5844 and IMG_5855; CRUSIER BIKE MOULDS.xlsx / Item List photos for 2127 and 2129.</span>
       </section>
 
+      <section className={s.colourNote} aria-label="Confirmed wheel ring quantity">
+        <h3>Confirmed: 2137 wheel rings · 6 pcs per bike</h3>
+        <p>Factory instruction on 07 Sep 2026 corrects red and brown wheel rings from 1 to <strong>6 pcs per bike</strong>. The assembly consumption stage is unchanged.</p>
+      </section>
+
       <section className={s.audit} aria-label="BOM quantity checks">
-        <div className={s.auditHeading}><h3>Check these at the factory · 07 Sep 2026 audit</h3><span className={s.pending}>Quantities unchanged pending confirmation</span></div>
+        <div className={s.auditHeading}><h3>Remaining factory checks · 07 Sep 2026 audit</h3><span className={s.pending}>Other quantities unchanged pending confirmation</span></div>
         <div className={s.checks}>
           {quantityChecks.map(check => <article className={s.check} key={check.part}>
             <div className={s.partHeading}><h4>{check.part}</h4><span>{check.sku}</span></div>

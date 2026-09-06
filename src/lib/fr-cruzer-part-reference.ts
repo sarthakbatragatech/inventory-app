@@ -25,7 +25,7 @@ const rearKit = 'Source label: rear fender. Photo shows a multi-part kit, includ
 const tankKit = 'Four-piece trim kit, including the rear tank sections toward the seat. White on red-white; brown on the other three variants.';
 const wheelCoverKit = 'The source photos show a ten-piece moulded kit. The blue kit weighs 65 g, consistent with the inward average per recorded count; do not multiply by the number of wheels.';
 const switchKit = 'Multi-part moulded kit, not just one electrical switch. Exact fitting positions need factory confirmation.';
-const ringReview = 'Confirm 3 rings per bike (one per wheel), rather than the current 1. Source photo shows one 13 g ring; planning uses 44 g per bike. Consumption is unchanged.';
+const ringContents = 'Factory-confirmed usage: 6 pcs per bike. Quantity corrected from 1 to 6; the assembly consumption stage is unchanged. The source photo shows a single wheel ring.';
 
 export const FR_CRUZER_PART_REFERENCES: Record<string, CruzerPartReference> = {
   'FR001-2127-WHITE': photo('2127-white', 'A8', fenderKit),
@@ -40,8 +40,8 @@ export const FR_CRUZER_PART_REFERENCES: Record<string, CruzerPartReference> = {
   'FR001-2136-RED': mould('2136', '20–21', wheelCoverKit),
   'FR001-2136-WHITE': photo('2136-white', 'A23', wheelCoverKit),
   'FR001-2136-GREEN': mould('2136', '20–21', wheelCoverKit),
-  'FR001-2137-BROWN': { ...photo('2137-brown', 'A25', 'Source photo shows a single wheel ring.'), review: ringReview },
-  'FR001-2137-RED': { ...photo('2137-red', 'A26', 'Source photo shows a single wheel ring.'), review: ringReview },
+  'FR001-2137-BROWN': { ...photo('2137-brown', 'A25', ringContents), source: `Factory instruction · 6 pcs per bike · 07 Sep 2026; photo: ${workbook}!A25` },
+  'FR001-2137-RED': { ...photo('2137-red', 'A26', ringContents), source: `Factory instruction · 6 pcs per bike · 07 Sep 2026; photo: ${workbook}!A26` },
   'FR001-2138-BROWN': photo('2138-brown', 'A27', switchKit),
   'FR001-2138-RED': mould('2138', '24–25', switchKit),
   'FR001-HANDLE-GRIP': {

@@ -22,7 +22,20 @@ test('the four missing exact-colour photos are explicitly mould references', () 
 
 test('quantity questions are distinct from mould-kit evidence', () => {
   const reviews = Object.entries(FR_CRUZER_PART_REFERENCES).filter(([, ref]) => ref.review).map(([sku]) => sku).sort();
-  assert.deepEqual(reviews, ['FR001-2137-BROWN', 'FR001-2137-RED', 'FR001-2141-BIG', 'FR001-2141-SMALL', 'FR001-HANDLE-GRIP']);
+  assert.deepEqual(reviews, ['FR001-2141-BIG', 'FR001-2141-SMALL', 'FR001-HANDLE-GRIP']);
   assert.equal(FR_CRUZER_PART_REFERENCES['FR001-2136-RED'].review, undefined);
   assert.match(FR_CRUZER_PART_REFERENCES['FR001-2127-RED'].contents!, /two front tank panels/);
+});
+
+test('both wheel ring colours record the factory-confirmed six pieces without a pending review', () => {
+  for (const sku of ['FR001-2137-BROWN', 'FR001-2137-RED']) {
+    const reference = FR_CRUZER_PART_REFERENCES[sku];
+    assert.equal(reference.review, undefined);
+    assert.match(reference.contents!, /Factory-confirmed usage: 6 pcs per bike/);
+    assert.match(reference.contents!, /assembly consumption stage is unchanged/);
+    assert.match(reference.source, /Factory instruction · 6 pcs per bike/);
+    assert.doesNotMatch(reference.contents!, /per wheel|one per wheel|two per wheel/);
+    assert.equal(reference.photoKind, 'component');
+    assert.ok(reference.photoUrl);
+  }
 });

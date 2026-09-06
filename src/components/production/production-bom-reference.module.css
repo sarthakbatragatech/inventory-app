@@ -23,7 +23,7 @@
 .audit { padding:18px 0; border-bottom:1px solid #dce3d7; }
 .auditHeading { display:flex; justify-content:space-between; flex-wrap:wrap; align-items:center; gap:8px 15px; }
 .pending { display:inline-block; font-size:10px; color:#755821; background:#fbf3e1; border:1px solid #e4d3ae; border-radius:4px; padding:4px 7px; line-height:1.5; }
-.checks { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:13px; }
+.checks { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:13px; }
 .check { min-width:0; background:white; border:1px solid #dde4d8; border-radius:8px; padding:14px; }
 .partHeading h4 { color:#30402e; font-size:12px; font-weight:650; line-height:1.5; }
 .partHeading>span { display:block; color:#67715e; font-size:10px; line-height:1.5; margin-top:3px; overflow-wrap:anywhere; }

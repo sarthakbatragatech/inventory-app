@@ -19,6 +19,17 @@ test('shared brown parts are not counted once for each colour', () => {
   ]), { quantity: 107, isExact: true });
 });
 
+test('six wheel rings are required per bike and brown stock is shared across three colours', () => {
+  assert.equal(calculateBuildableQuantity([part('red-ring', 17, 6)]), 2);
+  assert.equal(calculateBuildableQuantity([part('red-ring', 5, 6)]), 0);
+  assert.deepEqual(calculateBuildableMix([
+    [part('red-ring', 17, 6)],
+    [part('brown-ring', 23, 6)],
+    [part('brown-ring', 23, 6)],
+    [part('brown-ring', 23, 6)],
+  ]), { quantity: 5, isExact: true });
+});
+
 test('mix optimiser finds an alternative allocation across overlapping constraints', () => {
   // The first colour spends both limited parts; two separate colours make twice as many bikes.
   assert.deepEqual(calculateBuildableMix([
