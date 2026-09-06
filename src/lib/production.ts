@@ -5,6 +5,7 @@ import { getSupabaseInventoryServerClient } from '@/lib/supabase';
 import { loadAllRows } from '@/lib/supabase-pagination';
 import { calculateBuildableMix, calculateBuildableQuantity, calculateDemandPlanning, dateAgeDays } from '@/lib/production-analytics';
 import type { InwardQuantityEstimate } from '@/lib/inward-estimation';
+import { FR_CRUZER_PART_REFERENCES } from '@/lib/fr-cruzer-part-reference';
 
 export { calculateBuildableQuantity } from '@/lib/production-analytics';
 
@@ -464,7 +465,7 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
       shortageForOpenOrdersQty: Math.max(requiredForOpenOrdersQty - availableQty, 0),
       photoUrl:
         normalizedSku === FR_CRUZER_SKU
-          ? FR_CRUZER_COMPONENT_PHOTOS[line.componentSku] ?? null
+          ? FR_CRUZER_PART_REFERENCES[line.componentSku]?.photoUrl ?? FR_CRUZER_COMPONENT_PHOTOS[line.componentSku] ?? null
           : null,
       lastInwardDate: stockComponent?.lastInwardDate ?? null,
       lastInwardQty: stockComponent?.lastInwardQty ?? null,
@@ -566,7 +567,7 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
         buildableQty: calculateBuildableQuantity([line]) ?? 0,
         requiredForOpenOrdersQty: null, shortageForOpenOrdersQty: null,
         isLimiting: !line.hasUnitConflict && variantCapacity !== null && calculateBuildableQuantity([line]) === variantCapacity,
-        photoUrl: normalizedSku === FR_CRUZER_SKU ? FR_CRUZER_COMPONENT_PHOTOS[line.componentSku] ?? null : null,
+        photoUrl: normalizedSku === FR_CRUZER_SKU ? FR_CRUZER_PART_REFERENCES[line.componentSku]?.photoUrl ?? FR_CRUZER_COMPONENT_PHOTOS[line.componentSku] ?? null : null,
         lastInwardDate: stock?.lastInwardDate ?? null, lastInwardQty: stock?.lastInwardQty ?? null, lastInwardUnit: stock?.lastInwardUnit ?? null,
       });
     }

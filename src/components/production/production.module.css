@@ -124,6 +124,13 @@
 .photo { display:flex; align-items:center; justify-content:center; width:59px; height:51px; border:1px solid #e0e5db; border-radius:8px; overflow:hidden; background:#fff; color:#bec5b5; flex-shrink:0; }
 .photo img { object-fit:contain; width:100%; height:100%; padding:3px; transition:transform .2s; }
 .photo:hover img { transform:scale(1.07); }
+.photoWithLabel { display:flex; flex-direction:column; align-items:center; gap:4px; width:59px; flex-shrink:0; }
+.photoReferenceLabel { font-size:9px; font-weight:550; color:#755821; line-height:1.3; white-space:nowrap; }
+.partReference { margin-top:7px; text-align:left; }
+.workspace .partReference summary { color:#755821; min-height:28px; padding:4px 0; }
+.partReference p { max-width:460px; }
+.partReference small { overflow-wrap:anywhere; }
+@media (max-width:800px) { .workspace .partReference summary { min-height:40px; padding:10px 0; } }
 .sku { color:#89907f; }
 .danger { color:#ad4938 !important; }
 .negativeRow { background:#fcf6f2; }
