@@ -5,6 +5,7 @@ import { resolveItemFamilies } from '@/lib/item-family-links';
 import { listOrderPortalPendingOrders } from '@/lib/order-pending';
 import { getSupabaseInventoryServerClient } from '@/lib/supabase';
 import { loadAllRows } from '@/lib/supabase-pagination';
+import { hasMassCountUnitConflict } from '@/lib/production-analytics';
 
 export type StockComponentRow = {
   componentItemId: string;
@@ -21,6 +22,8 @@ export type StockComponentRow = {
   lastInwardDate: string | null;
   lastInwardQty: number | null;
   lastInwardUnit: string | null;
+  inwardUnits: string[];
+  hasUnitConflict: boolean;
 };
 
 export type StockModelSnapshot = {
@@ -542,6 +545,12 @@ async function buildStockSnapshot(input: {
     .map((component) => {
       const inwardQty = inwardTotals.get(component.componentItemId) ?? 0;
       const componentInwardRows = inwardRowsByItemId.get(component.componentItemId) ?? [];
+      const latestReconciliation = latestReconciliationByItemId.get(component.componentItemId);
+      const inwardUnits = [...new Set(componentInwardRows.map((row) => normalizeDisplayUnit(row.unit ?? null)).filter((unit): unit is string => Boolean(unit)))];
+      const balanceInwardRows = latestReconciliation
+        ? componentInwardRows.filter((row) => row.inward_date && row.inward_date > latestReconciliation.count_date)
+        : componentInwardRows;
+      const hasUnitConflict = hasMassCountUnitConflict(component.unit, balanceInwardRows.map((row) => row.unit ?? null));
       const lastInwardDate = componentInwardRows.reduce<string | null>((latest, row) => {
         if (!row.inward_date) {
           return latest;
@@ -591,6 +600,8 @@ async function buildStockSnapshot(input: {
         lastInwardDate,
         lastInwardQty,
         lastInwardUnit: lastInwardUnits.length === 1 ? lastInwardUnits[0] : null,
+        inwardUnits,
+        hasUnitConflict,
       };
     })
     .sort((left, right) => {

@@ -3,7 +3,6 @@
 .workspace :where(button,a,input,select,summary):focus-visible { outline:3px solid #ab752b; outline-offset:3px; }
 .workspace button, .workspace summary { cursor:pointer; }
 .workspace button:disabled { cursor:not-allowed; opacity:.5; }
-.workspace h1,.workspace h2,.workspace h3,.workspace p { margin:0; }
 .workspace h2 { font-size:18px; font-weight:650; letter-spacing:-.4px; }
 .workspace small { display:block; color:#72776f; font-size:11px; font-weight:400; line-height:1.5; }
 .heading { display:flex; justify-content:space-between; align-items:center; gap:24px; margin-bottom:22px; }
@@ -80,6 +79,7 @@
 .workspace details summary { font-size:11px; color:#6c7862; }
 .workspace details p { font-size:12px; color:#727b69; line-height:1.6; margin-top:9px; }
 .caption { border-top:1px solid #edf0e7; padding:12px 23px; font-size:11px; color:#7a8371; }
+.unallocated { border-top:1px solid #e8e3d5; background:#faf7ed; padding:8px 23px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:5px 15px; font-size:11px; color:#7a6137; }
 .runTotals { display:flex; flex-wrap:wrap; align-items:center; gap:15px 28px; padding:2px 2px 0; color:#7b8473; font-size:12px; }
 .runTotals>span { font-size:9px; letter-spacing:1.3px; font-weight:600; }
 .runTotals strong { color:#3e4c33; font-weight:600; }
@@ -172,10 +172,10 @@
   .materialCardTitle small { font-size:10px; overflow-wrap:anywhere; margin-top:3px; }
   .badgeDanger { background:#f4e1d7; color:#a05b38; border-radius:4px; padding:3px 6px; font-size:9px; align-self:flex-start; }
   .materialNumbers { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:20px 0; }
-  .materialNumbers dt { font-size:10px; color:#818b73; }
+  .materialNumbers dt { font-size:10px; color:#626d59; }
   .materialNumbers dd { font-size:14px; font-weight:550; margin-top:3px; font-variant-numeric:tabular-nums; }
-  .cardInward { border-top:1px solid #e4e9dc; padding-top:11px; display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; color:#7a856c; font-size:11px; }
-  .colorNote { font-size:10px; color:#7a8769; padding-top:10px; }
+  .cardInward { border-top:1px solid #e4e9dc; padding-top:11px; display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; color:#626d59; font-size:11px; }
+  .colorNote { font-size:10px; color:#626d59; padding-top:10px; }
   .tableNote details { flex:1; }
 }
 @media (max-width:540px) {
@@ -194,10 +194,11 @@
   .metrics article>div { font-size:10px; gap:6px; }
   .badgeDark { font-size:8px; padding:4px 5px; }
   .capacityMetric button { width:25px; height:25px; flex-shrink:0; }
-  .tabs { gap:23px; margin:10px 0 18px; }
+  .tabs { gap:clamp(10px,4vw,23px); margin:10px 0 18px; }
   .tabs>button { font-size:12px; gap:5px; min-height:51px; }
   .tabCount { font-size:9px; }
   .alertStrip { align-items:flex-start; gap:9px; padding:13px; flex-wrap:wrap; }
+  .alertStrip>div { flex:1 1 calc(100% - 40px); }
   .alertStrip .textButton { margin-left:32px; min-height:30px; }
   .panelHeading { padding:18px; gap:10px; flex-wrap:wrap; }
   .workspace h2 { font-size:16px; }

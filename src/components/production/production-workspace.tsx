@@ -10,11 +10,12 @@ import s from './production.module.css';
 
 type View = 'overview' | 'materials' | 'activity' | 'alerts';
 
-function Overview({ dashboard: d, onMaterials, onAlerts }: { dashboard: ProductionDashboard; onMaterials: (status: string) => void; onAlerts: () => void }) {
+function Overview({ dashboard: d, onMaterials, onAlerts, onActivity }: { dashboard: ProductionDashboard; onMaterials: (status: string) => void; onAlerts: () => void; onActivity: () => void }) {
   const plan = d.demandPlanning;
-  const shortages = d.componentReadiness.filter(row => row.shortageForOpenOrdersQty > 0);
+  const shortages = d.componentReadiness.filter(row => !row.hasUnitConflict && row.shortageForOpenOrdersQty > 0);
   const topAlert = d.alerts.find(alert => alert.severity === 'critical') ?? d.alerts.find(alert => alert.severity === 'warning');
   const produced = new Map(d.colorSummary.map(row => [row.color, row]));
+  const unmappedColors = d.colorSummary.filter(row => !d.colorCapacity.some(capacity => capacity.color === row.color) && (row.quantity || row.packedQuantity));
   const orderSlices = [
     { label: 'Ready to dispatch', value: plan.readyToDispatchQty, color: '#4b7164' },
     { label: 'In assembly / WIP', value: Math.min(plan.wipAvailableQty, plan.packingRequiredQty), color: '#d7b267' },
@@ -45,6 +46,7 @@ function Overview({ dashboard: d, onMaterials, onAlerts }: { dashboard: Producti
         const output = produced.get(row.color);
         return <article className={s.colorCard} key={row.color}><h3><ColorSwatch color={row.color} />{row.color}</h3><dl><div><dt>Assembled</dt><dd>{quantity(output?.quantity ?? 0)}</dd></div><div><dt>Packed</dt><dd>{quantity(output?.packedQuantity ?? 0)}</dd></div><div><dt>Can make</dt><dd className={row.buildableQty === 0 ? s.danger : ''}>{quantity(row.buildableQty)}</dd></div></dl><details><summary>Capacity details</summary><p>Colour parts alone: {quantity(row.variantBuildableQty)} bikes. Shared parts: {quantity(d.sharedBuildableQty)} bikes.</p>{row.limitingComponentNames.length > 0 && <p>Limited by {row.limitingComponentNames.join(', ')}.</p>}</details></article>;
       })}</div>
+      {unmappedColors.length > 0 && <div className={s.unallocated}>{unmappedColors.map(row => <span key={row.color}><strong>{row.color}:</strong> {quantity(row.quantity)} assembled · {quantity(row.packedQuantity)} packed</span>)}<button className={s.textButton} onClick={onActivity}>Review records →</button></div>}
       <div className={s.caption}>Colour capacities share parts and cannot be added. Sales and order quantities remain model-level.</div>
     </section>
     <div className={s.runTotals}><span>RECORDED OUTPUT</span><div><strong>{quantity(d.productionTotalQty)}</strong> assembled</div><div><strong>{quantity(d.packedTotalQty)}</strong> packed</div><div><strong>{quantity(d.salesTotalQty)}</strong> sold</div><a className={s.textButton} href={`/bom?fgSku=${encodeURIComponent(d.fgSku)}`}>BOM v{d.bomVersionNo ?? '—'} <span aria-hidden="true">↗</span></a></div>
@@ -164,9 +166,9 @@ export function ProductionWorkspace({ fgSku, colors, focusView = false }: { fgSk
         </section>
         <nav ref={sectionNav} className={s.tabs} aria-label="Cruzer sections">{(['overview', 'materials', 'activity', 'alerts'] as View[]).map(tab => <button key={tab} aria-current={view === tab ? 'page' : undefined} onClick={() => { setMaterialStatus('all'); setView(tab); }}><span>{tab[0].toUpperCase() + tab.slice(1)}</span>{tab === 'alerts' && alerts > 0 && <span className={s.tabCount}>{alerts}</span>}{tab === 'materials' && <span className={s.tabCount}>{dashboard.componentReadiness.length + dashboard.variantComponentReadiness.length}</span>}</button>)}</nav>
         <div className={s.view}>
-          {view === 'overview' && <Overview dashboard={dashboard} onMaterials={openMaterials} onAlerts={() => navigateTo('alerts')} />}
+          {view === 'overview' && <Overview dashboard={dashboard} onMaterials={openMaterials} onAlerts={() => navigateTo('alerts')} onActivity={() => navigateTo('activity')} />}
           {view === 'materials' && <ProductionMaterials key={materialStatus} dashboard={dashboard} colors={colors} initialStatus={materialStatus} />}
-          {view === 'activity' && <Activity dashboard={dashboard} colors={colors} onDelete={removeEntry} busy={busy} onSync={() => void mutate('/api/sync-sales?all=true', 'POST', 'Tycoon sales synced.')} />}
+          {view === 'activity' && <Activity dashboard={dashboard} colors={dashboard.colorSummary.map(row => row.color)} onDelete={removeEntry} busy={busy} onSync={() => void mutate('/api/sync-sales?all=true', 'POST', 'Tycoon sales synced.')} />}
           {view === 'alerts' && <ProductionAlertsPanel fgSku={fgSku} dashboard={dashboard} />}
         </div>
         <footer className={s.footer}><span>TYCOON <span className={s.divider}>/</span> FR-CRUZER</span><span>Inventory follows recorded inward and production.</span></footer>

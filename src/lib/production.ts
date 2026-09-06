@@ -38,6 +38,8 @@ export type ProductionComponentReadiness = {
   consumptionStage: 'assembled' | 'packed' | 'mixed';
   inwardQty: number;
   consumedQty: number;
+  inwardUnits: string[];
+  hasUnitConflict: boolean;
   availableQty: number;
   buildableQty: number;
   requiredForOpenOrdersQty: number;
@@ -426,6 +428,7 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
   const packingLines = currentLines.filter((line) => line.qtyPerPack > 0).map((line) => ({
     qtyPerFg: line.qtyPerPack,
     availableQty: Number(componentStockById.get(line.componentItemId)?.balanceQty ?? 0),
+    hasUnitConflict: componentStockById.get(line.componentItemId)?.hasUnitConflict ?? false,
   }));
   const packingCapacityQty = packingLines.length ? calculateBuildableQuantity(packingLines) : currentVersion ? Math.max(workInProgressQty, 0) : null;
   const demandPlanning = calculateDemandPlanning({ pendingOrderQty, productionTotalQty, packedTotalQty, salesTotalQty, packingCapacityQty });
@@ -434,7 +437,8 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
   const preliminaryReadiness = currentLines.map((line) => {
     const stockComponent = componentStockById.get(line.componentItemId);
     const availableQty = Number(stockComponent?.balanceQty ?? 0);
-    const buildableQty = calculateBuildableQuantity([{ availableQty, qtyPerFg: line.qtyPerFg }]) ?? 0;
+    const hasUnitConflict = stockComponent?.hasUnitConflict ?? false;
+    const buildableQty = calculateBuildableQuantity([{ availableQty, qtyPerFg: line.qtyPerFg, hasUnitConflict }]) ?? 0;
     const requiredForOpenOrdersQty = demandPlanning.newAssemblyRequiredQty * line.qtyPerAssembly + demandPlanning.packingRequiredQty * line.qtyPerPack;
 
     return {
@@ -442,6 +446,8 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
       availableQty,
       inwardQty: Number(stockComponent?.inwardQty ?? 0),
       consumedQty: Number(stockComponent?.consumedQty ?? 0),
+      inwardUnits: stockComponent?.inwardUnits ?? [],
+      hasUnitConflict,
       buildableQty,
       requiredForOpenOrdersQty,
       shortageForOpenOrdersQty: Math.max(requiredForOpenOrdersQty - availableQty, 0),
@@ -471,11 +477,12 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
     (variantLinesByColor.get(color) ?? []).map((line) => ({
       ...line,
       availableQty: Number(componentStockById.get(line.componentItemId)?.balanceQty ?? 0),
+      hasUnitConflict: componentStockById.get(line.componentItemId)?.hasUnitConflict ?? false,
     }))
   ]));
   const hasVariantBom = (currentVersion?.variantLines.length ?? 0) > 0;
   const allColorComponents = configuredColors.map((color) => {
-    const aggregated = new Map<string, { componentItemId: string; componentName: string; availableQty: number; qtyPerFg: number }>();
+    const aggregated = new Map<string, { componentItemId: string; componentName: string; availableQty: number; qtyPerFg: number; hasUnitConflict: boolean }>();
     for (const line of [...preliminaryReadiness, ...(variantComponentsByColor.get(color) ?? [])]) {
       const previous = aggregated.get(line.componentItemId);
       aggregated.set(line.componentItemId, { ...line, qtyPerFg: (previous?.qtyPerFg ?? 0) + line.qtyPerFg });
@@ -495,13 +502,17 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
   });
   const variantMix = calculateBuildableMix([...variantComponentsByColor.values()]);
   const fullMix = hasVariantBom ? calculateBuildableMix(allColorComponents.filter((_, index) => (variantComponentsByColor.get(configuredColors[index])?.length ?? 0) > 0)) : { quantity: sharedBuildableQty, isExact: sharedBuildableQty !== null };
+  const hasMissingColorBom = hasVariantBom && configuredColors.some((color) => !variantLinesByColor.get(color)?.length);
+  const hasCompleteBom = Boolean(currentVersion) && currentLines.length > 0 && !hasMissingColorBom;
+  const hasUnitConflicts = preliminaryReadiness.some((row) => row.hasUnitConflict) || [...variantComponentsByColor.values()].some((rows) => rows.some((row) => row.hasUnitConflict));
+  const capacityIsExact = fullMix.isExact && hasCompleteBom && !hasUnitConflicts;
   const variantBuildableQty = hasVariantBom ? variantMix.quantity : null;
   const buildableQty = fullMix.quantity;
   const componentReadiness = preliminaryReadiness
     .map((component) => ({
       ...component,
       isLimiting:
-        sharedBuildableQty !== null &&
+        !component.hasUnitConflict && sharedBuildableQty !== null &&
         sharedBuildableQty === buildableQty &&
         component.buildableQty === sharedBuildableQty,
     }))
@@ -527,16 +538,17 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
       const previous = variantReadinessById.get(line.componentItemId);
       if (previous) {
         previous.colors.push(color);
-        previous.isLimiting ||= calculateBuildableQuantity([line]) === variantCapacity;
+        previous.isLimiting ||= !line.hasUnitConflict && variantCapacity !== null && calculateBuildableQuantity([line]) === variantCapacity;
         continue;
       }
       const stock = componentStockById.get(line.componentItemId);
       variantReadinessById.set(line.componentItemId, {
         ...line, colors: [color], consumptionStage: 'assembled',
         inwardQty: Number(stock?.inwardQty ?? 0), consumedQty: Number(stock?.consumedQty ?? 0),
+        inwardUnits: stock?.inwardUnits ?? [],
         buildableQty: calculateBuildableQuantity([line]) ?? 0,
         requiredForOpenOrdersQty: null, shortageForOpenOrdersQty: null,
-        isLimiting: calculateBuildableQuantity([line]) === variantCapacity,
+        isLimiting: !line.hasUnitConflict && variantCapacity !== null && calculateBuildableQuantity([line]) === variantCapacity,
         photoUrl: normalizedSku === FR_CRUZER_SKU ? FR_CRUZER_COMPONENT_PHOTOS[line.componentSku] ?? null : null,
         lastInwardDate: stock?.lastInwardDate ?? null, lastInwardQty: stock?.lastInwardQty ?? null, lastInwardUnit: stock?.lastInwardUnit ?? null,
       });
@@ -570,29 +582,40 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
     salesAgeDays: dateAgeDays(latestSalesDate, today),
   };
   const alerts: ProductionAlert[] = [];
-  const negativeComponents = allReadiness.filter((row) => row.availableQty < 0);
+  const incompatibleUnits = allReadiness.filter((row) => row.hasUnitConflict);
+  if (incompatibleUnits.length) alerts.push({
+    code: 'inward-unit-conflict', severity: 'critical', title: `${incompatibleUnits.length} components need unit clarification`,
+    message: `${incompatibleUnits.slice(0, 3).map((row) => row.componentSku).join(', ')}${incompatibleUnits.length > 3 ? ` and ${incompatibleUnits.length - 3} more` : ''}: inward weight and BOM piece counts are incompatible. Enter piece counts or a verified kg-to-pcs conversion.`,
+    componentItemIds: incompatibleUnits.map((row) => row.componentItemId),
+  });
+  const negativeComponents = allReadiness.filter((row) => !row.hasUnitConflict && row.availableQty < 0);
   if (negativeComponents.length) alerts.push({
     code: 'negative-stock', severity: 'critical', title: `${negativeComponents.length} component${negativeComponents.length === 1 ? '' : 's'} need stock reconciliation`,
     message: 'Recorded consumption exceeds stock received. Verify inward entries or enter a physical count before relying on capacity.',
     componentItemIds: negativeComponents.map((row) => row.componentItemId),
   });
-  const commonShortages = componentReadiness.filter((row) => row.shortageForOpenOrdersQty > 0);
+  const commonShortages = componentReadiness.filter((row) => !row.hasUnitConflict && row.shortageForOpenOrdersQty > 0);
   if (commonShortages.length && pendingAfterFinishedGoodsQty > 0) alerts.push({
     code: 'material-shortage', severity: buildableQty === 0 ? 'critical' : 'warning', title: `${commonShortages.length} shared component${commonShortages.length === 1 ? '' : 's'} short for orders`,
     message: `Demand allows for ${demandPlanning.readyToDispatchQty.toLocaleString('en-IN')} ready bikes and ${demandPlanning.wipAvailableQty.toLocaleString('en-IN')} in assembly. Review the remaining component requirements.`,
     componentItemIds: commonShortages.map((row) => row.componentItemId),
   });
-  const unavailableVariants = variantComponentReadiness.filter((row) => row.buildableQty === 0);
+  const unavailableVariants = variantComponentReadiness.filter((row) => !row.hasUnitConflict && row.buildableQty === 0);
   if (unavailableVariants.length) alerts.push({
     code: 'colour-stockout', severity: 'warning', title: 'Some colours are blocked by plastic parts',
     message: `${[...new Set(unavailableVariants.flatMap((row) => row.colors))].join(', ')} cannot be assembled from current colour stock.`,
     componentItemIds: unavailableVariants.map((row) => row.componentItemId),
   });
-  if (workInProgressQty < 0 || reportedFinishedGoodsQty < 0 || colorSummary.some((row) => row.packedQuantity > row.quantity)) alerts.push({
+  const ledgerIssues = colorSummary
+    .filter((row) => row.packedQuantity > row.quantity)
+    .map((row) => `${row.color}: ${(row.packedQuantity - row.quantity).toLocaleString('en-IN')} more packed than assembled`);
+  if (workInProgressQty < 0) ledgerIssues.push(`Model total: ${(-workInProgressQty).toLocaleString('en-IN')} more packed than assembled`);
+  if (reportedFinishedGoodsQty < 0) ledgerIssues.push(`Model total: ${(-reportedFinishedGoodsQty).toLocaleString('en-IN')} more sold than packed`);
+  if (ledgerIssues.length) alerts.push({
     code: 'production-ledger-mismatch', severity: 'critical', title: 'Production and sales totals need review',
-    message: 'Packing exceeds assembly for a colour, or sales exceed packed output. Check the report coverage and opening stock.', componentItemIds: [],
+    message: `${ledgerIssues.slice(0, 3).join('; ')}${ledgerIssues.length > 3 ? `; ${ledgerIssues.length - 3} more discrepancies` : ''}. Check report coverage and opening stock.`, componentItemIds: [],
   });
-  if (!currentVersion || currentLines.length === 0 || (hasVariantBom && configuredColors.some((color) => !variantLinesByColor.get(color)?.length))) alerts.push({
+  if (!hasCompleteBom) alerts.push({
     code: 'incomplete-bom', severity: 'warning', title: 'BOM coverage is incomplete',
     message: 'A current shared BOM and a mapped BOM for each colour are needed to establish full production capacity.', componentItemIds: [],
   });
@@ -604,9 +627,13 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
     code: 'stale-reports', severity: 'warning', title: 'Check report freshness',
     message: `Latest recorded activity: ${staleSources.join('; ')}. Confirm the reports are up to date.`, componentItemIds: [],
   });
-  if (!fullMix.isExact && buildableQty !== null) alerts.push({
-    code: 'capacity-lower-bound', severity: 'info', title: 'Capacity is a conservative estimate',
-    message: 'The feasible colour mix uses shared stock once; a different allocation may allow more bikes.', componentItemIds: [],
+  if (!capacityIsExact && !hasUnitConflicts && buildableQty !== null) alerts.push({
+    code: 'capacity-lower-bound', severity: 'info', title: hasCompleteBom ? 'Capacity is a conservative estimate' : 'Capacity uses incomplete BOM coverage',
+    message: hasMissingColorBom
+      ? 'Capacity counts mapped colours. Complete the missing colour BOMs before treating this as full model capacity.'
+      : !hasCompleteBom
+        ? 'Capacity counts configured components. Complete the shared BOM before treating this as full model capacity.'
+        : 'The feasible colour mix uses shared stock once; a different allocation may allow more bikes.', componentItemIds: [],
   });
 
   return {
@@ -636,7 +663,7 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
     variantComponentReadiness,
     sharedBuildableQty,
     variantBuildableQty,
-    capacityIsExact: fullMix.isExact,
+    capacityIsExact,
     demandPlanning,
     dataFreshness,
     alerts,

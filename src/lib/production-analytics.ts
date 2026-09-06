@@ -2,12 +2,28 @@ export type CapacityComponent = {
   componentItemId: string;
   availableQty: number;
   qtyPerFg: number;
+  hasUnitConflict?: boolean;
 };
 
+export function hasMassCountUnitConflict(bomUnit: string | null, inwardUnits: Array<string | null>) {
+  const dimension = (unit: string | null) => {
+    const normalized = unit?.trim().toLowerCase();
+    if (['kg', 'kgs', 'kilogram', 'kilograms', 'g', 'gram', 'grams'].includes(normalized ?? '')) return 'mass';
+    if (['pc', 'pcs', 'piece', 'pieces', 'no', 'nos', 'nos.', 'unit', 'units', 'set', 'sets', 'pair', 'pairs'].includes(normalized ?? '')) return 'count';
+    return null;
+  };
+  const expected = dimension(bomUnit);
+  return expected !== null && inwardUnits.some((unit) => dimension(unit) !== null && dimension(unit) !== expected);
+}
+
 export function calculateBuildableQuantity(
-  components: Array<{ availableQty: number; qtyPerFg: number }>
+  components: Array<{ availableQty: number; qtyPerFg: number; hasUnitConflict?: boolean }>
 ) {
   if (components.length === 0) return null;
+  if (components.some((row) => row.hasUnitConflict)) {
+    const verified = components.filter((row) => !row.hasUnitConflict);
+    return verified.some((row) => Number.isFinite(row.availableQty) && Number.isFinite(row.qtyPerFg) && row.qtyPerFg > 0 && row.availableQty < row.qtyPerFg) ? 0 : null;
+  }
   // An invalid BOM requirement cannot establish a reliable capacity.
   if (components.some((row) => !Number.isFinite(row.qtyPerFg) || row.qtyPerFg <= 0 || !Number.isFinite(row.availableQty))) {
     return null;
@@ -20,6 +36,10 @@ export function calculateBuildableMix(colorComponents: CapacityComponent[][]) {
   if (colorComponents.length === 0 || colorComponents.some((rows) => calculateBuildableQuantity(rows) === null)) {
     return { quantity: null, isExact: false };
   }
+  const hasUnitConflict = colorComponents.some((rows) => rows.some((row) => row.hasUnitConflict));
+  // Unknown rows can only reach this point when verified stock already blocks their colour.
+  colorComponents = colorComponents.filter((rows) => calculateBuildableQuantity(rows) !== 0);
+  if (colorComponents.length === 0) return { quantity: 0, isExact: !hasUnitConflict };
   const items = [...new Set(colorComponents.flatMap((rows) => rows.map((row) => row.componentItemId)))];
   const available = items.map((id) => Math.max(0, Math.min(...colorComponents.flatMap((rows) => rows.filter((row) => row.componentItemId === id).map((row) => row.availableQty)))));
   const requirements = colorComponents.map((rows) => items.map((id) => rows.filter((row) => row.componentItemId === id).reduce((sum, row) => sum + row.qtyPerFg, 0)));
@@ -62,7 +82,7 @@ export function calculateBuildableMix(colorComponents: CapacityComponent[][]) {
     }
   }
   search(0, available, 0);
-  return { quantity: best, isExact: !exhausted };
+  return { quantity: best, isExact: !exhausted && !hasUnitConflict };
 }
 
 export function calculateDemandPlanning(input: {

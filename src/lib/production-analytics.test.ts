@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateBuildableMix, calculateBuildableQuantity, calculateDemandPlanning, dateAgeDays, type CapacityComponent } from './production-analytics';
+import { calculateBuildableMix, calculateBuildableQuantity, calculateDemandPlanning, dateAgeDays, hasMassCountUnitConflict, type CapacityComponent } from './production-analytics';
 
 const part = (componentItemId: string, availableQty: number, qtyPerFg = 1): CapacityComponent => ({ componentItemId, availableQty, qtyPerFg });
 
@@ -74,4 +74,21 @@ test('freshness distinguishes absent or invalid dates from activity today', () =
   assert.equal(dateAgeDays('invalid', '2026-09-07'), null);
   assert.equal(dateAgeDays('2026-09-07', '2026-09-07'), 0);
   assert.equal(dateAgeDays('2026-09-06', '2026-09-07'), 1);
+});
+
+test('stored mass and count units conflict without assuming set-to-piece conversions', () => {
+  assert.equal(hasMassCountUnitConflict('pcs', ['PCS', 'KGS']), true);
+  assert.equal(hasMassCountUnitConflict('kg', ['pcs']), true);
+  assert.equal(hasMassCountUnitConflict('pcs', ['PCS']), false);
+  assert.equal(hasMassCountUnitConflict('set', ['PCS']), false);
+  assert.equal(hasMassCountUnitConflict('pcs', [null]), false);
+});
+
+test('unit conflicts cannot claim a numeric capacity, including apparent negative stock', () => {
+  const wheel = { ...part('wheel', 28.91), hasUnitConflict: true };
+  assert.equal(calculateBuildableQuantity([wheel]), null);
+  assert.equal(calculateBuildableQuantity([{ ...wheel, availableQty: -30 }, part('frame', 40)]), null);
+  assert.equal(calculateBuildableQuantity([wheel, part('pipe', -572, 2)]), 0);
+  assert.deepEqual(calculateBuildableMix([[wheel], [part('aqua', 66)]]), { quantity: null, isExact: false });
+  assert.deepEqual(calculateBuildableMix([[wheel, part('pipe', -572, 2)], [part('aqua', 66), part('pipe', -572, 2)]]), { quantity: 0, isExact: false });
 });
