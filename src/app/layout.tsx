@@ -30,10 +30,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <header className="sticky top-0 z-40 border-b border-neutral-200/80 bg-white/90 backdrop-blur">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+        <header className="app-header sticky top-0 z-40 border-b border-neutral-200/80 bg-white/90 backdrop-blur">
+          <div className="mx-auto flex max-w-[1480px] flex-col gap-2 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
             <Brand compact />
-            <nav className="flex items-center gap-1 text-sm sm:gap-2">
+            <nav aria-label="Main navigation" className="flex max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap text-sm sm:gap-2 [&>a]:shrink-0">
               <Link
                 href="/"
                 className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-sky-100 hover:text-sky-950"

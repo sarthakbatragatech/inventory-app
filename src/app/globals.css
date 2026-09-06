@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+body:has(.cruzer-focus) .app-header { display: none; }
+
 :root {
   --background: #fafafa;
   --foreground: #171717;

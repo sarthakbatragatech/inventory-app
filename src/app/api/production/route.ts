@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const dashboard = await getProductionDashboard(fgSku);
-    return NextResponse.json({ dashboard });
+    return NextResponse.json({ dashboard }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Unknown production dashboard error';

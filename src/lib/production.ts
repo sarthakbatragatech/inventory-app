@@ -2,6 +2,10 @@ import { getBomDetailBySku, type BomVersionDetail } from '@/lib/bom';
 import { listOrderPortalPendingOrders } from '@/lib/order-pending';
 import { getStockSnapshotByFgSku } from '@/lib/stock';
 import { getSupabaseInventoryServerClient } from '@/lib/supabase';
+import { loadAllRows } from '@/lib/supabase-pagination';
+import { calculateBuildableMix, calculateBuildableQuantity, calculateDemandPlanning, dateAgeDays } from '@/lib/production-analytics';
+
+export { calculateBuildableQuantity } from '@/lib/production-analytics';
 
 export const FR_CRUZER_SKU = 'FR-CRUZER';
 
@@ -31,6 +35,9 @@ export type ProductionComponentReadiness = {
   componentName: string;
   unit: string | null;
   qtyPerFg: number;
+  consumptionStage: 'assembled' | 'packed' | 'mixed';
+  inwardQty: number;
+  consumedQty: number;
   availableQty: number;
   buildableQty: number;
   requiredForOpenOrdersQty: number;
@@ -70,7 +77,22 @@ const FR_CRUZER_COMPONENT_PHOTOS: Record<string, string> = {
 export type ProductionColorCapacity = {
   color: string;
   buildableQty: number | null;
+  variantBuildableQty: number | null;
   limitingComponentNames: string[];
+};
+
+export type ProductionVariantComponentReadiness = Omit<ProductionComponentReadiness, 'requiredForOpenOrdersQty' | 'shortageForOpenOrdersQty'> & {
+  colors: string[];
+  requiredForOpenOrdersQty: null;
+  shortageForOpenOrdersQty: null;
+};
+
+export type ProductionAlert = {
+  code: string;
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  message: string;
+  componentItemIds: string[];
 };
 
 export type ProductionDashboard = {
@@ -97,6 +119,20 @@ export type ProductionDashboard = {
   buildableQty: number | null;
   recommendedBuildQty: number | null;
   componentReadiness: ProductionComponentReadiness[];
+  variantComponentReadiness: ProductionVariantComponentReadiness[];
+  sharedBuildableQty: number | null;
+  variantBuildableQty: number | null;
+  capacityIsExact: boolean;
+  demandPlanning: ReturnType<typeof calculateDemandPlanning>;
+  dataFreshness: {
+    calculatedAt: string;
+    latestProductionDate: string | null;
+    latestSalesDate: string | null;
+    latestInwardDate: string | null;
+    productionAgeDays: number | null;
+    salesAgeDays: number | null;
+  };
+  alerts: ProductionAlert[];
 };
 
 type ProductionEntryRow = Omit<ProductionEntry, 'quantity' | 'packed_quantity'> & {
@@ -114,7 +150,9 @@ function normalizeFgSku(value: string) {
 }
 
 function isIsoDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
 }
 
 function normalizeProductionEntry(row: ProductionEntryRow): ProductionEntry {
@@ -143,6 +181,9 @@ function aggregateCurrentBomLines(version: BomVersionDetail | null) {
       componentName: string;
       unit: string | null;
       qtyPerFg: number;
+      qtyPerAssembly: number;
+      qtyPerPack: number;
+      consumptionStage: 'assembled' | 'packed' | 'mixed';
     }
   >();
 
@@ -150,6 +191,9 @@ function aggregateCurrentBomLines(version: BomVersionDetail | null) {
     const current = aggregated.get(line.component_item_id);
     if (current) {
       current.qtyPerFg += Number(line.qty_per_fg ?? 0);
+      if (line.consumption_stage === 'packed') current.qtyPerPack += Number(line.qty_per_fg ?? 0);
+      else current.qtyPerAssembly += Number(line.qty_per_fg ?? 0);
+      if (current.consumptionStage !== line.consumption_stage) current.consumptionStage = 'mixed';
       continue;
     }
 
@@ -159,6 +203,9 @@ function aggregateCurrentBomLines(version: BomVersionDetail | null) {
       componentName: line.component_name,
       unit: line.unit,
       qtyPerFg: Number(line.qty_per_fg ?? 0),
+      qtyPerAssembly: line.consumption_stage === 'packed' ? 0 : Number(line.qty_per_fg ?? 0),
+      qtyPerPack: line.consumption_stage === 'packed' ? Number(line.qty_per_fg ?? 0) : 0,
+      consumptionStage: line.consumption_stage,
     });
   }
 
@@ -200,22 +247,6 @@ function aggregateVariantBomLines(version: BomVersionDetail | null, color: strin
   return [...aggregated.values()];
 }
 
-export function calculateBuildableQuantity(
-  components: Array<{ availableQty: number; qtyPerFg: number }>
-) {
-  if (components.length === 0) {
-    return null;
-  }
-
-  return components.reduce((minimum, component) => {
-    const componentBuildable = Math.max(
-      Math.floor(Math.max(component.availableQty, 0) / component.qtyPerFg),
-      0
-    );
-    return Math.min(minimum, componentBuildable);
-  }, Number.POSITIVE_INFINITY);
-}
-
 export async function listProductionEntries(fgSku: string) {
   const normalizedSku = normalizeFgSku(fgSku);
   const supabase = getSupabaseInventoryServerClient();
@@ -233,18 +264,16 @@ export async function listProductionEntries(fgSku: string) {
     return [];
   }
 
-  const { data, error } = await supabase
+  const data = await loadAllRows<ProductionEntryRow>((from, to) => supabase
     .from('production_entries')
     .select(
       'id, bom_model_id, production_date, color_variant, quantity, packed_quantity, report_reference, notes, created_at, updated_at'
     )
     .eq('bom_model_id', model.id)
     .order('production_date', { ascending: false })
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    throw new Error(`Failed to load production entries: ${error.message}`);
-  }
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(from, to), 'Failed to load production entries');
 
   return ((data ?? []) as ProductionEntryRow[]).map(normalizeProductionEntry);
 }
@@ -363,22 +392,19 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
   const supabase = getSupabaseInventoryServerClient();
   const detail = await getBomDetailBySku(normalizedSku);
 
-  const [productionEntries, stockSnapshot, pendingRows, salesResult] = await Promise.all([
+  const [productionEntries, stockSnapshot, pendingRows, rawSalesRows] = await Promise.all([
     listProductionEntries(normalizedSku),
     detail ? getStockSnapshotByFgSku(normalizedSku) : Promise.resolve(null),
     listOrderPortalPendingOrders(),
-    supabase
+    loadAllRows<SalesRow>((from, to) => supabase
       .from('daily_fg_sales_import')
       .select('sale_date, qty')
       .eq('fg_sku', normalizedSku)
-      .order('sale_date', { ascending: false }),
+      .order('sale_date', { ascending: false })
+      .range(from, to), 'Failed to load model sales'),
   ]);
-
-  if (salesResult.error) {
-    throw new Error(`Failed to load model sales: ${salesResult.error.message}`);
-  }
-
-  const today = new Date().toISOString().slice(0, 10);
+  const calculatedAt = new Date().toISOString();
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(calculatedAt));
   const currentVersion = selectEffectiveBomVersion(detail?.versions ?? [], today);
   const currentLines = aggregateCurrentBomLines(currentVersion);
   const componentStockById = new Map(
@@ -391,19 +417,31 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
       quantity: Number(row.qty ?? 0),
     }));
   const pendingOrderQty = matchingPendingRows.reduce((sum, row) => sum + row.quantity, 0);
+  const productionTotalQty = productionEntries.reduce((sum, row) => sum + row.quantity, 0);
+  const packedTotalQty = productionEntries.reduce((sum, row) => sum + row.packed_quantity, 0);
+  const workInProgressQty = productionTotalQty - packedTotalQty;
+  const salesRows = rawSalesRows.map((row) => ({ saleDate: row.sale_date, quantity: Number(row.qty ?? 0) }));
+  const salesTotalQty = salesRows.reduce((sum, row) => sum + row.quantity, 0);
+  const reportedFinishedGoodsQty = packedTotalQty - salesTotalQty;
+  const packingLines = currentLines.filter((line) => line.qtyPerPack > 0).map((line) => ({
+    qtyPerFg: line.qtyPerPack,
+    availableQty: Number(componentStockById.get(line.componentItemId)?.balanceQty ?? 0),
+  }));
+  const packingCapacityQty = packingLines.length ? calculateBuildableQuantity(packingLines) : currentVersion ? Math.max(workInProgressQty, 0) : null;
+  const demandPlanning = calculateDemandPlanning({ pendingOrderQty, productionTotalQty, packedTotalQty, salesTotalQty, packingCapacityQty });
+  const pendingAfterFinishedGoodsQty = demandPlanning.packingRequiredQty;
 
   const preliminaryReadiness = currentLines.map((line) => {
     const stockComponent = componentStockById.get(line.componentItemId);
     const availableQty = Number(stockComponent?.balanceQty ?? 0);
-    const buildableQty = Math.max(
-      Math.floor(Math.max(availableQty, 0) / line.qtyPerFg),
-      0
-    );
-    const requiredForOpenOrdersQty = pendingOrderQty * line.qtyPerFg;
+    const buildableQty = calculateBuildableQuantity([{ availableQty, qtyPerFg: line.qtyPerFg }]) ?? 0;
+    const requiredForOpenOrdersQty = demandPlanning.newAssemblyRequiredQty * line.qtyPerAssembly + demandPlanning.packingRequiredQty * line.qtyPerPack;
 
     return {
       ...line,
       availableQty,
+      inwardQty: Number(stockComponent?.inwardQty ?? 0),
+      consumedQty: Number(stockComponent?.consumedQty ?? 0),
       buildableQty,
       requiredForOpenOrdersQty,
       shortageForOpenOrdersQty: Math.max(requiredForOpenOrdersQty - availableQty, 0),
@@ -429,85 +467,36 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
   const variantLinesByColor = new Map(
     configuredColors.map((color) => [color, aggregateVariantBomLines(currentVersion, color)])
   );
-  const calculateVariantCapacity = (
-    lines: ReturnType<typeof aggregateVariantBomLines>
-  ) => {
-    const components = lines.map((line) => ({
+  const variantComponentsByColor = new Map(configuredColors.map((color) => [color,
+    (variantLinesByColor.get(color) ?? []).map((line) => ({
       ...line,
       availableQty: Number(componentStockById.get(line.componentItemId)?.balanceQty ?? 0),
-    }));
-    const buildable = calculateBuildableQuantity(components);
-
-    return {
-      buildable,
-      limitingComponentNames:
-        buildable === null
-          ? []
-          : components
-              .filter(
-                (component) =>
-                  Math.max(
-                    Math.floor(
-                      Math.max(component.availableQty, 0) / component.qtyPerFg
-                    ),
-                    0
-                  ) === buildable
-              )
-              .map((component) => component.componentName),
-    };
-  };
+    }))
+  ]));
+  const hasVariantBom = (currentVersion?.variantLines.length ?? 0) > 0;
+  const allColorComponents = configuredColors.map((color) => {
+    const aggregated = new Map<string, { componentItemId: string; componentName: string; availableQty: number; qtyPerFg: number }>();
+    for (const line of [...preliminaryReadiness, ...(variantComponentsByColor.get(color) ?? [])]) {
+      const previous = aggregated.get(line.componentItemId);
+      aggregated.set(line.componentItemId, { ...line, qtyPerFg: (previous?.qtyPerFg ?? 0) + line.qtyPerFg });
+    }
+    return [...aggregated.values()];
+  });
   const colorCapacity = configuredColors.map((color) => {
-    const capacity = calculateVariantCapacity(variantLinesByColor.get(color) ?? []);
+    const variants = variantComponentsByColor.get(color) ?? [];
+    const components = allColorComponents[configuredColors.indexOf(color)];
+    const capacity = hasVariantBom && !variants.length ? null : calculateBuildableQuantity(components);
     return {
       color,
-      buildableQty: capacity.buildable,
-      limitingComponentNames: capacity.limitingComponentNames,
+      buildableQty: capacity,
+      variantBuildableQty: calculateBuildableQuantity(variants),
+      limitingComponentNames: capacity === null ? [] : components.filter((row) => calculateBuildableQuantity([row]) === capacity).map((row) => row.componentName),
     };
   });
-
-  let variantBuildableQty: number | null = null;
-  if ((currentVersion?.variantLines.length ?? 0) > 0) {
-    const redCapacity =
-      colorCapacity.find((row) => row.color === 'Red-White')?.buildableQty ?? 0;
-    const brownColors = ['Aqua-Brown', 'White-Brown', 'Military Green-Brown'];
-    const brownLineSets = brownColors.map(
-      (color) => variantLinesByColor.get(color) ?? []
-    );
-    const sharedBrownIds = brownLineSets.length
-      ? new Set(
-          brownLineSets[0]
-            .map((line) => line.componentItemId)
-            .filter((componentItemId) =>
-              brownLineSets.every((lines) =>
-                lines.some((line) => line.componentItemId === componentItemId)
-              )
-            )
-        )
-      : new Set<string>();
-    const sharedBrownLines = brownLineSets[0]?.filter((line) =>
-      sharedBrownIds.has(line.componentItemId)
-    ) ?? [];
-    const sharedBrownCapacity = calculateVariantCapacity(sharedBrownLines).buildable;
-    const uniqueBrownCapacity = brownLineSets.reduce((sum, lines) => {
-      const capacity = calculateVariantCapacity(
-        lines.filter((line) => !sharedBrownIds.has(line.componentItemId))
-      ).buildable;
-      return sum + (capacity ?? 0);
-    }, 0);
-    const brownCapacity =
-      sharedBrownCapacity === null
-        ? uniqueBrownCapacity
-        : Math.min(sharedBrownCapacity, uniqueBrownCapacity);
-
-    variantBuildableQty = redCapacity + brownCapacity;
-  }
-
-  const buildableQty =
-    sharedBuildableQty === null
-      ? null
-      : variantBuildableQty === null
-        ? sharedBuildableQty
-        : Math.min(sharedBuildableQty, variantBuildableQty);
+  const variantMix = calculateBuildableMix([...variantComponentsByColor.values()]);
+  const fullMix = hasVariantBom ? calculateBuildableMix(allColorComponents.filter((_, index) => (variantComponentsByColor.get(configuredColors[index])?.length ?? 0) > 0)) : { quantity: sharedBuildableQty, isExact: sharedBuildableQty !== null };
+  const variantBuildableQty = hasVariantBom ? variantMix.quantity : null;
+  const buildableQty = fullMix.quantity;
   const componentReadiness = preliminaryReadiness
     .map((component) => ({
       ...component,
@@ -524,24 +513,36 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
       return left.componentSku.localeCompare(right.componentSku);
     });
 
-  const productionTotalQty = productionEntries.reduce((sum, row) => sum + row.quantity, 0);
-  const packedTotalQty = productionEntries.reduce(
-    (sum, row) => sum + row.packed_quantity,
-    0
-  );
-  const workInProgressQty = productionTotalQty - packedTotalQty;
-  const salesRows = ((salesResult.data ?? []) as SalesRow[]).map((row) => ({
-    saleDate: row.sale_date,
-    quantity: Number(row.qty ?? 0),
-  }));
-  const salesTotalQty = salesRows.reduce((sum, row) => sum + row.quantity, 0);
-  const reportedFinishedGoodsQty = packedTotalQty - salesTotalQty;
-  const pendingAfterFinishedGoodsQty = Math.max(
-    pendingOrderQty - Math.max(reportedFinishedGoodsQty, 0),
-    0
-  );
+  // Finish the recommended WIP first; its packing parts cannot also fund new bikes.
+  const reservedPackingQty = demandPlanning.recommendedPackQty ?? 0;
+  const packingPerItem = new Map(currentLines.map((line) => [line.componentItemId, line.qtyPerPack]));
+  const remainingMix = hasVariantBom ? calculateBuildableMix(allColorComponents.filter((_, index) => (variantComponentsByColor.get(configuredColors[index])?.length ?? 0) > 0).map((rows) => rows.map((row) => ({ ...row, availableQty: row.availableQty - reservedPackingQty * (packingPerItem.get(row.componentItemId) ?? 0) })))) : { quantity: calculateBuildableQuantity(preliminaryReadiness.map((row) => ({ ...row, availableQty: row.availableQty - reservedPackingQty * row.qtyPerPack }))) };
   const recommendedBuildQty =
-    buildableQty === null ? null : Math.min(buildableQty, pendingAfterFinishedGoodsQty);
+    remainingMix.quantity === null ? null : Math.min(remainingMix.quantity, demandPlanning.newAssemblyRequiredQty);
+
+  const variantReadinessById = new Map<string, ProductionVariantComponentReadiness>();
+  for (const [color, lines] of variantComponentsByColor) {
+    const variantCapacity = calculateBuildableQuantity(lines);
+    for (const line of lines) {
+      const previous = variantReadinessById.get(line.componentItemId);
+      if (previous) {
+        previous.colors.push(color);
+        previous.isLimiting ||= calculateBuildableQuantity([line]) === variantCapacity;
+        continue;
+      }
+      const stock = componentStockById.get(line.componentItemId);
+      variantReadinessById.set(line.componentItemId, {
+        ...line, colors: [color], consumptionStage: 'assembled',
+        inwardQty: Number(stock?.inwardQty ?? 0), consumedQty: Number(stock?.consumedQty ?? 0),
+        buildableQty: calculateBuildableQuantity([line]) ?? 0,
+        requiredForOpenOrdersQty: null, shortageForOpenOrdersQty: null,
+        isLimiting: calculateBuildableQuantity([line]) === variantCapacity,
+        photoUrl: normalizedSku === FR_CRUZER_SKU ? FR_CRUZER_COMPONENT_PHOTOS[line.componentSku] ?? null : null,
+        lastInwardDate: stock?.lastInwardDate ?? null, lastInwardQty: stock?.lastInwardQty ?? null, lastInwardUnit: stock?.lastInwardUnit ?? null,
+      });
+    }
+  }
+  const variantComponentReadiness = [...variantReadinessById.values()].sort((left, right) => left.buildableQty - right.buildableQty || left.componentSku.localeCompare(right.componentSku));
 
   const colorTotals = productionEntries.reduce((map, row) => {
     const current = map.get(row.color_variant) ?? { quantity: 0, packedQuantity: 0 };
@@ -558,6 +559,55 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
     quantity: colorTotals.get(color)?.quantity ?? 0,
     packedQuantity: colorTotals.get(color)?.packedQuantity ?? 0,
   }));
+
+  const allReadiness = [...componentReadiness, ...variantComponentReadiness];
+  const latestInwardDate = allReadiness.reduce<string | null>((latest, row) => row.lastInwardDate && (!latest || row.lastInwardDate > latest) ? row.lastInwardDate : latest, null);
+  const latestProductionDate = productionEntries[0]?.production_date ?? null;
+  const latestSalesDate = salesRows[0]?.saleDate ?? null;
+  const dataFreshness = {
+    calculatedAt, latestProductionDate, latestSalesDate, latestInwardDate,
+    productionAgeDays: dateAgeDays(latestProductionDate, today),
+    salesAgeDays: dateAgeDays(latestSalesDate, today),
+  };
+  const alerts: ProductionAlert[] = [];
+  const negativeComponents = allReadiness.filter((row) => row.availableQty < 0);
+  if (negativeComponents.length) alerts.push({
+    code: 'negative-stock', severity: 'critical', title: `${negativeComponents.length} component${negativeComponents.length === 1 ? '' : 's'} need stock reconciliation`,
+    message: 'Recorded consumption exceeds stock received. Verify inward entries or enter a physical count before relying on capacity.',
+    componentItemIds: negativeComponents.map((row) => row.componentItemId),
+  });
+  const commonShortages = componentReadiness.filter((row) => row.shortageForOpenOrdersQty > 0);
+  if (commonShortages.length && pendingAfterFinishedGoodsQty > 0) alerts.push({
+    code: 'material-shortage', severity: buildableQty === 0 ? 'critical' : 'warning', title: `${commonShortages.length} shared component${commonShortages.length === 1 ? '' : 's'} short for orders`,
+    message: `Demand allows for ${demandPlanning.readyToDispatchQty.toLocaleString('en-IN')} ready bikes and ${demandPlanning.wipAvailableQty.toLocaleString('en-IN')} in assembly. Review the remaining component requirements.`,
+    componentItemIds: commonShortages.map((row) => row.componentItemId),
+  });
+  const unavailableVariants = variantComponentReadiness.filter((row) => row.buildableQty === 0);
+  if (unavailableVariants.length) alerts.push({
+    code: 'colour-stockout', severity: 'warning', title: 'Some colours are blocked by plastic parts',
+    message: `${[...new Set(unavailableVariants.flatMap((row) => row.colors))].join(', ')} cannot be assembled from current colour stock.`,
+    componentItemIds: unavailableVariants.map((row) => row.componentItemId),
+  });
+  if (workInProgressQty < 0 || reportedFinishedGoodsQty < 0 || colorSummary.some((row) => row.packedQuantity > row.quantity)) alerts.push({
+    code: 'production-ledger-mismatch', severity: 'critical', title: 'Production and sales totals need review',
+    message: 'Packing exceeds assembly for a colour, or sales exceed packed output. Check the report coverage and opening stock.', componentItemIds: [],
+  });
+  if (!currentVersion || currentLines.length === 0 || (hasVariantBom && configuredColors.some((color) => !variantLinesByColor.get(color)?.length))) alerts.push({
+    code: 'incomplete-bom', severity: 'warning', title: 'BOM coverage is incomplete',
+    message: 'A current shared BOM and a mapped BOM for each colour are needed to establish full production capacity.', componentItemIds: [],
+  });
+  const staleSources = [
+    dataFreshness.productionAgeDays === null ? 'production (no report)' : dataFreshness.productionAgeDays > 7 ? `production (${dataFreshness.productionAgeDays} days)` : null,
+    dataFreshness.salesAgeDays === null ? 'sales (no report)' : dataFreshness.salesAgeDays > 7 ? `sales (${dataFreshness.salesAgeDays} days)` : null,
+  ].filter(Boolean);
+  if (staleSources.length) alerts.push({
+    code: 'stale-reports', severity: 'warning', title: 'Check report freshness',
+    message: `Latest recorded activity: ${staleSources.join('; ')}. Confirm the reports are up to date.`, componentItemIds: [],
+  });
+  if (!fullMix.isExact && buildableQty !== null) alerts.push({
+    code: 'capacity-lower-bound', severity: 'info', title: 'Capacity is a conservative estimate',
+    message: 'The feasible colour mix uses shared stock once; a different allocation may allow more bikes.', componentItemIds: [],
+  });
 
   return {
     fgSku: normalizedSku,
@@ -583,5 +633,12 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
     buildableQty,
     recommendedBuildQty,
     componentReadiness,
+    variantComponentReadiness,
+    sharedBuildableQty,
+    variantBuildableQty,
+    capacityIsExact: fullMix.isExact,
+    demandPlanning,
+    dataFreshness,
+    alerts,
   };
 }

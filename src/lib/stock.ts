@@ -4,6 +4,7 @@ import { deriveItemFamily } from '@/lib/item-family';
 import { resolveItemFamilies } from '@/lib/item-family-links';
 import { listOrderPortalPendingOrders } from '@/lib/order-pending';
 import { getSupabaseInventoryServerClient } from '@/lib/supabase';
+import { loadAllRows } from '@/lib/supabase-pagination';
 
 export type StockComponentRow = {
   componentItemId: string;
@@ -184,15 +185,13 @@ async function loadLatestReconciliationByItemIds(
     return new Map<string, ReconciliationRow>();
   }
 
-  const { data: reconciliations, error: reconciliationError } = await supabase
+  const reconciliations = await loadAllRows<ReconciliationRow>((from, to) => supabase
     .from('stock_reconciliations')
     .select('item_id, count_date, physical_qty')
     .in('item_id', itemIds)
-    .order('count_date', { ascending: false });
-
-  if (reconciliationError) {
-    throw new Error(`Failed to load stock reconciliations: ${reconciliationError.message}`);
-  }
+    .order('count_date', { ascending: false })
+    .order('id', { ascending: false })
+    .range(from, to), 'Failed to load stock reconciliations');
 
   return ((reconciliations ?? []) as ReconciliationRow[]).reduce((map, row) => {
     if (!map.has(row.item_id)) {
@@ -211,19 +210,13 @@ async function loadStockAdjustmentsByItemIds(
     return new Map<string, StockAdjustmentRow[]>();
   }
 
-  const { data: adjustments, error: adjustmentError } = await supabase
+  const adjustments = await loadAllRows<StockAdjustmentRow>((from, to) => supabase
     .from('stock_adjustments')
     .select('item_id, adjustment_date, quantity_delta')
     .in('item_id', itemIds)
-    .order('adjustment_date', { ascending: true });
-
-  if (
-    adjustmentError &&
-    !['PGRST205', '42P01'].includes(adjustmentError.code || '') &&
-    !adjustmentError.message.includes('does not exist')
-  ) {
-    throw new Error(`Failed to load stock adjustments: ${adjustmentError.message}`);
-  }
+    .order('adjustment_date', { ascending: true })
+    .order('id', { ascending: true })
+    .range(from, to), 'Failed to load stock adjustments');
 
   return ((adjustments ?? []) as StockAdjustmentRow[]).reduce((map, row) => {
     const existing = map.get(row.item_id) ?? [];
@@ -237,6 +230,34 @@ export async function listStockModels() {
   return listBomModels();
 }
 
+async function loadCurrentInwardRows(
+  supabase: ReturnType<typeof getSupabaseInventoryServerClient>,
+  itemIds: string[]
+) {
+  if (!itemIds.length) return [] as InwardRow[];
+  const batches = await loadAllRows<BatchRecord>((from, to) => supabase
+    .from('import_batches')
+    .select('id, file_name, uploaded_at, status')
+    .eq('status', 'processed')
+    .order('uploaded_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(from, to), 'Failed to load import batches');
+  const batchIds = selectNewestBatchPerFileName(batches).map((batch) => batch.id);
+  const rows: InwardRow[] = [];
+  for (let batchIndex = 0; batchIndex < batchIds.length; batchIndex += 100) {
+    for (let itemIndex = 0; itemIndex < itemIds.length; itemIndex += 100) {
+      rows.push(...await loadAllRows<InwardRow>((from, to) => supabase
+        .from('import_batch_rows')
+        .select('item_id, quantity, inward_date, unit, batch_id')
+        .in('batch_id', batchIds.slice(batchIndex, batchIndex + 100))
+        .in('item_id', itemIds.slice(itemIndex, itemIndex + 100))
+        .order('id', { ascending: true })
+        .range(from, to), 'Failed to load component inward rows'));
+    }
+  }
+  return rows;
+}
+
 async function loadComponentConsumption() {
   const supabase = getSupabaseInventoryServerClient();
   const bomModels = await listBomModels();
@@ -245,28 +266,21 @@ async function loadComponentConsumption() {
   ).filter((value): value is NonNullable<typeof value> => Boolean(value));
 
   const fgSkus = bomDetails.map((modelDetail) => modelDetail.model.fg_sku);
-  const [
-    { data: salesRows, error: salesError },
-    { data: productionRows, error: productionError },
-  ] = await Promise.all([
-    supabase
+  const [salesRows, productionRows] = await Promise.all([
+    loadAllRows<SalesRow>((from, to) => supabase
       .from('daily_fg_sales_import')
       .select('fg_sku, sale_date, qty')
       .in('fg_sku', fgSkus)
-      .order('sale_date', { ascending: true }),
-    supabase
+      .order('sale_date', { ascending: true })
+      .order('fg_sku', { ascending: true })
+      .range(from, to), 'Failed to load model sales'),
+    loadAllRows<ProductionRow>((from, to) => supabase
       .from('production_entries')
       .select('bom_model_id, production_date, color_variant, quantity, packed_quantity')
-      .order('production_date', { ascending: true }),
+      .order('production_date', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to), 'Failed to load model production'),
   ]);
-
-  if (salesError) {
-    throw new Error(`Failed to load model sales: ${salesError.message}`);
-  }
-
-  if (productionError) {
-    throw new Error(`Failed to load model production: ${productionError.message}`);
-  }
 
   const typedSalesRows = (salesRows ?? []) as SalesRow[];
   const salesByFgSku = typedSalesRows.reduce((map, row) => {
@@ -508,21 +522,13 @@ async function buildStockSnapshot(input: {
   const componentItemIds = [...input.selectedComponentUsage.keys()];
   const inwardTotals = new Map<string, number>();
   const inwardRowsByItemId = new Map<string, InwardRow[]>();
-  const [latestReconciliationByItemId, stockAdjustmentsByItemId] = await Promise.all([
+  const [latestReconciliationByItemId, stockAdjustmentsByItemId, inwardRows] = await Promise.all([
     loadLatestReconciliationByItemIds(supabase, componentItemIds),
     loadStockAdjustmentsByItemIds(supabase, componentItemIds),
+    loadCurrentInwardRows(supabase, componentItemIds),
   ]);
 
   if (componentItemIds.length > 0) {
-    const { data: inwardRows, error: inwardError } = await supabase
-      .from('import_batch_rows')
-      .select('item_id, quantity, inward_date, unit')
-      .in('item_id', componentItemIds);
-
-    if (inwardError) {
-      throw new Error(`Failed to load component inward rows: ${inwardError.message}`);
-    }
-
     for (const row of (inwardRows ?? []) as InwardRow[]) {
       const existing = inwardTotals.get(row.item_id) ?? 0;
       inwardTotals.set(row.item_id, existing + Number(row.quantity ?? 0));
@@ -681,34 +687,17 @@ export async function getStockListItems() {
   const supabase = getSupabaseInventoryServerClient();
   const [
     { bomDetails, globalComponentUsage, globalComponentUsageByDate, monthSpan },
-    { data: batches, error: batchError },
-    { data: items, error: itemError },
+    items,
   ] = await Promise.all([
     loadComponentConsumption(),
-    supabase
-      .from('import_batches')
-      .select('id, file_name, uploaded_at, status')
-      .eq('status', 'processed')
-      .order('uploaded_at', { ascending: false }),
-    supabase
+    loadAllRows<ItemRecord>((from, to) => supabase
       .from('items')
       .select('id, sku, item_name, family, category, default_unit, created_at, active')
       .eq('active', true)
       .order('item_name', { ascending: true })
-      .limit(2000),
+      .order('id', { ascending: true })
+      .range(from, to), 'Failed to load inventory items'),
   ]);
-
-  if (batchError) {
-    throw new Error(`Failed to load import batches: ${batchError.message}`);
-  }
-
-  if (itemError) {
-    throw new Error(`Failed to load inventory items: ${itemError.message}`);
-  }
-
-  const latestBatchIds = selectNewestBatchPerFileName(
-    (batches ?? []) as BatchRecord[]
-  ).map((batch) => batch.id);
 
   const itemList = (items ?? []) as ItemRecord[];
   const allItemIds = new Set(itemList.map((item) => item.id));
@@ -721,31 +710,12 @@ export async function getStockListItems() {
     allItemIds.add(componentItemId);
   }
 
-  const inwardRows: InwardRow[] = [];
   const itemIds = [...allItemIds];
-  const [latestReconciliationByItemId, stockAdjustmentsByItemId] = await Promise.all([
+  const [latestReconciliationByItemId, stockAdjustmentsByItemId, inwardRows] = await Promise.all([
     loadLatestReconciliationByItemIds(supabase, itemIds),
     loadStockAdjustmentsByItemIds(supabase, itemIds),
+    loadCurrentInwardRows(supabase, itemIds),
   ]);
-
-  for (let index = 0; index < latestBatchIds.length; index += 100) {
-    const batchChunk = latestBatchIds.slice(index, index + 100);
-    if (!batchChunk.length || !itemIds.length) {
-      continue;
-    }
-
-    const { data, error } = await supabase
-      .from('import_batch_rows')
-      .select('item_id, quantity, inward_date, unit, batch_id')
-      .in('batch_id', batchChunk)
-      .in('item_id', itemIds);
-
-    if (error) {
-      throw new Error(`Failed to load inward rows: ${error.message}`);
-    }
-
-    inwardRows.push(...((data ?? []) as InwardRow[]));
-  }
 
   const rowsByItemId = new Map<string, InwardRow[]>();
   for (const row of inwardRows) {
