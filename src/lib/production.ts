@@ -4,6 +4,7 @@ import { getStockSnapshotByFgSku } from '@/lib/stock';
 import { getSupabaseInventoryServerClient } from '@/lib/supabase';
 import { loadAllRows } from '@/lib/supabase-pagination';
 import { calculateBuildableMix, calculateBuildableQuantity, calculateDemandPlanning, dateAgeDays } from '@/lib/production-analytics';
+import type { InwardQuantityEstimate } from '@/lib/inward-estimation';
 
 export { calculateBuildableQuantity } from '@/lib/production-analytics';
 
@@ -40,6 +41,10 @@ export type ProductionComponentReadiness = {
   consumedQty: number;
   inwardUnits: string[];
   hasUnitConflict: boolean;
+  hasEstimatedStock: boolean;
+  estimatedInwardQty: number;
+  inwardEstimates: InwardQuantityEstimate[];
+  lastInwardEstimated: boolean;
   availableQty: number;
   buildableQty: number;
   requiredForOpenOrdersQty: number;
@@ -81,6 +86,7 @@ export type ProductionColorCapacity = {
   buildableQty: number | null;
   variantBuildableQty: number | null;
   limitingComponentNames: string[];
+  hasEstimatedStock: boolean;
 };
 
 export type ProductionVariantComponentReadiness = Omit<ProductionComponentReadiness, 'requiredForOpenOrdersQty' | 'shortageForOpenOrdersQty'> & {
@@ -125,6 +131,7 @@ export type ProductionDashboard = {
   sharedBuildableQty: number | null;
   variantBuildableQty: number | null;
   capacityIsExact: boolean;
+  hasEstimatedStock: boolean;
   demandPlanning: ReturnType<typeof calculateDemandPlanning>;
   dataFreshness: {
     calculatedAt: string;
@@ -396,7 +403,7 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
 
   const [productionEntries, stockSnapshot, pendingRows, rawSalesRows] = await Promise.all([
     listProductionEntries(normalizedSku),
-    detail ? getStockSnapshotByFgSku(normalizedSku) : Promise.resolve(null),
+    detail ? getStockSnapshotByFgSku(normalizedSku, { estimateInwardQuantities: normalizedSku === FR_CRUZER_SKU }) : Promise.resolve(null),
     listOrderPortalPendingOrders(),
     loadAllRows<SalesRow>((from, to) => supabase
       .from('daily_fg_sales_import')
@@ -448,6 +455,10 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
       consumedQty: Number(stockComponent?.consumedQty ?? 0),
       inwardUnits: stockComponent?.inwardUnits ?? [],
       hasUnitConflict,
+      hasEstimatedStock: stockComponent?.hasEstimatedStock ?? false,
+      estimatedInwardQty: stockComponent?.estimatedInwardQty ?? 0,
+      inwardEstimates: stockComponent?.inwardEstimates ?? [],
+      lastInwardEstimated: stockComponent?.lastInwardEstimated ?? false,
       buildableQty,
       requiredForOpenOrdersQty,
       shortageForOpenOrdersQty: Math.max(requiredForOpenOrdersQty - availableQty, 0),
@@ -478,11 +489,12 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
       ...line,
       availableQty: Number(componentStockById.get(line.componentItemId)?.balanceQty ?? 0),
       hasUnitConflict: componentStockById.get(line.componentItemId)?.hasUnitConflict ?? false,
+      hasEstimatedStock: componentStockById.get(line.componentItemId)?.hasEstimatedStock ?? false,
     }))
   ]));
   const hasVariantBom = (currentVersion?.variantLines.length ?? 0) > 0;
   const allColorComponents = configuredColors.map((color) => {
-    const aggregated = new Map<string, { componentItemId: string; componentName: string; availableQty: number; qtyPerFg: number; hasUnitConflict: boolean }>();
+    const aggregated = new Map<string, { componentItemId: string; componentName: string; availableQty: number; qtyPerFg: number; hasUnitConflict: boolean; hasEstimatedStock: boolean }>();
     for (const line of [...preliminaryReadiness, ...(variantComponentsByColor.get(color) ?? [])]) {
       const previous = aggregated.get(line.componentItemId);
       aggregated.set(line.componentItemId, { ...line, qtyPerFg: (previous?.qtyPerFg ?? 0) + line.qtyPerFg });
@@ -498,6 +510,7 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
       buildableQty: capacity,
       variantBuildableQty: calculateBuildableQuantity(variants),
       limitingComponentNames: capacity === null ? [] : components.filter((row) => calculateBuildableQuantity([row]) === capacity).map((row) => row.componentName),
+      hasEstimatedStock: components.some((row) => row.hasEstimatedStock),
     };
   });
   const variantMix = calculateBuildableMix([...variantComponentsByColor.values()]);
@@ -505,7 +518,8 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
   const hasMissingColorBom = hasVariantBom && configuredColors.some((color) => !variantLinesByColor.get(color)?.length);
   const hasCompleteBom = Boolean(currentVersion) && currentLines.length > 0 && !hasMissingColorBom;
   const hasUnitConflicts = preliminaryReadiness.some((row) => row.hasUnitConflict) || [...variantComponentsByColor.values()].some((rows) => rows.some((row) => row.hasUnitConflict));
-  const capacityIsExact = fullMix.isExact && hasCompleteBom && !hasUnitConflicts;
+  const hasEstimatedStock = allColorComponents.some((rows) => rows.some((row) => row.hasEstimatedStock)) || preliminaryReadiness.some((row) => row.hasEstimatedStock);
+  const capacityIsExact = fullMix.isExact && hasCompleteBom && !hasUnitConflicts && !hasEstimatedStock;
   const variantBuildableQty = hasVariantBom ? variantMix.quantity : null;
   const buildableQty = fullMix.quantity;
   const componentReadiness = preliminaryReadiness
@@ -546,6 +560,9 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
         ...line, colors: [color], consumptionStage: 'assembled',
         inwardQty: Number(stock?.inwardQty ?? 0), consumedQty: Number(stock?.consumedQty ?? 0),
         inwardUnits: stock?.inwardUnits ?? [],
+        estimatedInwardQty: stock?.estimatedInwardQty ?? 0,
+        inwardEstimates: stock?.inwardEstimates ?? [],
+        lastInwardEstimated: stock?.lastInwardEstimated ?? false,
         buildableQty: calculateBuildableQuantity([line]) ?? 0,
         requiredForOpenOrdersQty: null, shortageForOpenOrdersQty: null,
         isLimiting: !line.hasUnitConflict && variantCapacity !== null && calculateBuildableQuantity([line]) === variantCapacity,
@@ -588,6 +605,12 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
     message: `${incompatibleUnits.slice(0, 3).map((row) => row.componentSku).join(', ')}${incompatibleUnits.length > 3 ? ` and ${incompatibleUnits.length - 3} more` : ''}: inward weight and BOM piece counts are incompatible. Enter piece counts or a verified kg-to-pcs conversion.`,
     componentItemIds: incompatibleUnits.map((row) => row.componentItemId),
   });
+  const estimatedComponents = allReadiness.filter((row) => row.hasEstimatedStock);
+  if (estimatedComponents.length) alerts.push({
+    code: 'estimated-inward', severity: 'warning', title: `${estimatedComponents.length} components use estimated piece counts`,
+    message: 'Weight-only inward uses the latest earlier average weight for the same component and colour (or its own recorded lot average), rounded down per lot. Stock and capacity are provisional. Upload the accountant’s corrected Excel to replace these estimates.',
+    componentItemIds: estimatedComponents.map((row) => row.componentItemId),
+  });
   const negativeComponents = allReadiness.filter((row) => !row.hasUnitConflict && row.availableQty < 0);
   if (negativeComponents.length) alerts.push({
     code: 'negative-stock', severity: 'critical', title: `${negativeComponents.length} component${negativeComponents.length === 1 ? '' : 's'} need stock reconciliation`,
@@ -627,7 +650,7 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
     code: 'stale-reports', severity: 'warning', title: 'Check report freshness',
     message: `Latest recorded activity: ${staleSources.join('; ')}. Confirm the reports are up to date.`, componentItemIds: [],
   });
-  if (!capacityIsExact && !hasUnitConflicts && buildableQty !== null) alerts.push({
+  if ((!fullMix.isExact || !hasCompleteBom) && !hasUnitConflicts && buildableQty !== null) alerts.push({
     code: 'capacity-lower-bound', severity: 'info', title: hasCompleteBom ? 'Capacity is a conservative estimate' : 'Capacity uses incomplete BOM coverage',
     message: hasMissingColorBom
       ? 'Capacity counts mapped colours. Complete the missing colour BOMs before treating this as full model capacity.'
@@ -664,6 +687,7 @@ export async function getProductionDashboard(fgSku: string): Promise<ProductionD
     sharedBuildableQty,
     variantBuildableQty,
     capacityIsExact,
+    hasEstimatedStock,
     demandPlanning,
     dataFreshness,
     alerts,

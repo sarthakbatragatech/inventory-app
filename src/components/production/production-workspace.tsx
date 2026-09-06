@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ProductionDashboard, ProductionEntry } from '@/lib/production';
 import { ProductionEntryDialog } from './production-entry-dialog';
-import { ProductionMaterials } from './production-materials';
+import { EstimatedMark, ProductionMaterials } from './production-materials';
 import { ProductionAlertsPanel } from './production-alerts-panel';
 import { ColorSwatch, csvDownload, dateLabel, quantity } from './production-ui';
 import s from './production.module.css';
@@ -13,6 +13,8 @@ type View = 'overview' | 'materials' | 'activity' | 'alerts';
 function Overview({ dashboard: d, onMaterials, onAlerts, onActivity }: { dashboard: ProductionDashboard; onMaterials: (status: string) => void; onAlerts: () => void; onActivity: () => void }) {
   const plan = d.demandPlanning;
   const shortages = d.componentReadiness.filter(row => !row.hasUnitConflict && row.shortageForOpenOrdersQty > 0);
+  const sharedStockEstimated = d.componentReadiness.some(row => row.hasEstimatedStock);
+  const packingEstimated = d.componentReadiness.some(row => row.hasEstimatedStock && row.consumptionStage !== 'assembled');
   const topAlert = d.alerts.find(alert => alert.severity === 'critical') ?? d.alerts.find(alert => alert.severity === 'warning');
   const produced = new Map(d.colorSummary.map(row => [row.color, row]));
   const unmappedColors = d.colorSummary.filter(row => !d.colorCapacity.some(capacity => capacity.color === row.color) && (row.quantity || row.packedQuantity));
@@ -30,13 +32,13 @@ function Overview({ dashboard: d, onMaterials, onAlerts, onActivity }: { dashboa
           <div className={s.coverageBar} role="img" aria-label={`${quantity(plan.readyToDispatchQty)} ready, ${quantity(Math.min(plan.wipAvailableQty, plan.packingRequiredQty))} in WIP, ${quantity(plan.newAssemblyRequiredQty)} new assemblies needed out of ${quantity(d.pendingOrderQty)} open orders`}>
             {orderSlices.map(slice => <span key={slice.label} style={{ width: `${d.pendingOrderQty > 0 ? slice.value / d.pendingOrderQty * 100 : 0}%`, background: slice.color }} />)}
           </div>
-          <dl className={s.planRows}>{orderSlices.map((slice, index) => <div key={slice.label}><dt><span className={s.step}>{index + 1}</span><span><strong>{slice.label}</strong>{index === 1 && <small>{quantity(plan.recommendedPackQty)} can be packed with current parts</small>}</span></dt><dd>{quantity(slice.value)}</dd></div>)}</dl>
+          <dl className={s.planRows}>{orderSlices.map((slice, index) => <div key={slice.label}><dt><span className={s.step}>{index + 1}</span><span><strong>{slice.label}</strong>{index === 1 && <small>{quantity(plan.recommendedPackQty)} can be packed with current parts{packingEstimated && plan.recommendedPackQty != null && <EstimatedMark />}</small>}</span></dt><dd>{quantity(slice.value)}</dd></div>)}</dl>
           <div className={s.planTotal}><span>Open orders</span><strong>{quantity(d.pendingOrderQty)} bikes</strong></div>
         </div>
       </section>
       <section className={s.panel} aria-labelledby="priority-heading">
         <div className={s.panelHeading}><div><span className={s.eyebrow}>PURCHASE PRIORITIES</span><h2 id="priority-heading">Shared parts to replenish</h2></div><span className={s.count}>{shortages.length}</span></div>
-        <div className={s.priorityList}>{shortages.length ? shortages.slice(0, 4).map(row => <button key={row.componentItemId} onClick={() => onMaterials('purchase')} className={s.priorityRow}><span><strong>{row.componentName.replace(/^FR[ -]?001\s*/i, '')}</strong><small>{quantity(row.availableQty, row.unit)} in stock · {row.consumptionStage === 'packed' ? 'Packing' : 'Assembly'}</small></span><span className={s.priorityQty}>{quantity(row.shortageForOpenOrdersQty)}<small>{row.unit || 'pcs'} to order</small></span></button>) : <div className={s.empty}>Shared parts cover net order demand.</div>}</div>
+        <div className={s.priorityList}>{shortages.length ? shortages.slice(0, 4).map(row => <button key={row.componentItemId} onClick={() => onMaterials('purchase')} className={s.priorityRow}><span><strong>{row.componentName.replace(/^FR[ -]?001\s*/i, '')}</strong><small>{quantity(row.availableQty, row.unit)} in stock · {row.consumptionStage === 'packed' ? 'Packing' : 'Assembly'}{row.hasEstimatedStock && <EstimatedMark />}</small></span><span className={s.priorityQty}>{quantity(row.shortageForOpenOrdersQty)}<small>{row.unit || 'pcs'} to order{row.hasEstimatedStock && <EstimatedMark />}</small></span></button>) : <div className={s.empty}>Shared parts cover net order demand.{sharedStockEstimated && <EstimatedMark />}</div>}</div>
         <div className={s.panelFooter}><button className={s.textButton} onClick={() => onMaterials('all')}>View all materials <span aria-hidden="true">→</span></button><span>After finished stock &amp; WIP</span></div>
       </section>
     </div>
@@ -44,7 +46,8 @@ function Overview({ dashboard: d, onMaterials, onAlerts, onActivity }: { dashboa
       <div className={s.panelHeading}><div><span className={s.eyebrow}>PRODUCTION MIX</span><h2 id="colour-heading">Four colours. One shared inventory.</h2></div><span className={s.muted}>Bikes</span></div>
       <div className={s.colorGrid}>{d.colorCapacity.map(row => {
         const output = produced.get(row.color);
-        return <article className={s.colorCard} key={row.color}><h3><ColorSwatch color={row.color} />{row.color}</h3><dl><div><dt>Assembled</dt><dd>{quantity(output?.quantity ?? 0)}</dd></div><div><dt>Packed</dt><dd>{quantity(output?.packedQuantity ?? 0)}</dd></div><div><dt>Can make</dt><dd className={row.buildableQty === 0 ? s.danger : ''}>{quantity(row.buildableQty)}</dd></div></dl><details><summary>Capacity details</summary><p>Colour parts alone: {quantity(row.variantBuildableQty)} bikes. Shared parts: {quantity(d.sharedBuildableQty)} bikes.</p>{row.limitingComponentNames.length > 0 && <p>Limited by {row.limitingComponentNames.join(', ')}.</p>}</details></article>;
+        const variantEstimated = d.variantComponentReadiness.some(part => part.colors.includes(row.color) && part.hasEstimatedStock);
+        return <article className={s.colorCard} key={row.color}><h3><ColorSwatch color={row.color} />{row.color}</h3><dl><div><dt>Assembled</dt><dd>{quantity(output?.quantity ?? 0)}</dd></div><div><dt>Packed</dt><dd>{quantity(output?.packedQuantity ?? 0)}</dd></div><div><dt>Can make</dt><dd className={row.buildableQty === 0 ? s.danger : ''}>{quantity(row.buildableQty)}{row.hasEstimatedStock && row.buildableQty != null && <EstimatedMark />}</dd></div></dl><details><summary>Capacity details</summary><p>Colour parts alone: {quantity(row.variantBuildableQty)} bikes{variantEstimated && row.variantBuildableQty != null && <> <EstimatedMark /></>}. Shared parts: {quantity(d.sharedBuildableQty)} bikes{sharedStockEstimated && d.sharedBuildableQty != null && <> <EstimatedMark /></>}.</p>{row.limitingComponentNames.length > 0 && <p>Limited by {row.limitingComponentNames.join(', ')}.</p>}{row.hasEstimatedStock && <p>Includes estimated kg-to-piece inward. Confirm the updated lot counts before committing production.</p>}</details></article>;
       })}</div>
       {unmappedColors.length > 0 && <div className={s.unallocated}>{unmappedColors.map(row => <span key={row.color}><strong>{row.color}:</strong> {quantity(row.quantity)} assembled · {quantity(row.packedQuantity)} packed</span>)}<button className={s.textButton} onClick={onActivity}>Review records →</button></div>}
       <div className={s.caption}>Colour capacities share parts and cannot be added. Sales and order quantities remain model-level.</div>
@@ -159,11 +162,12 @@ export function ProductionWorkspace({ fgSku, colors, focusView = false }: { fgSk
         <div className={s.freshness}><span>{loading ? 'Refreshing…' : 'Snapshot'} <time dateTime={dashboard.dataFreshness.calculatedAt}>{new Date(dashboard.dataFreshness.calculatedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</time></span><span>Production <strong>{dateLabel(dashboard.dataFreshness.latestProductionDate)}</strong></span><span>Sales <strong>{dateLabel(dashboard.dataFreshness.latestSalesDate)}</strong></span><span>Inward <strong>{dateLabel(dashboard.dataFreshness.latestInwardDate)}</strong></span></div>
         {!dashboard.bomVersionId && <div className={s.error}>An effective BOM is needed to calculate capacity. <a href={`/bom?fgSku=${encodeURIComponent(fgSku)}`}>Set up BOM →</a></div>}
         <section className={s.metrics} aria-label="Production summary">
-          <article className={s.capacityMetric}><span>Can make now</span><strong>{quantity(dashboard.buildableQty)}</strong><div>{dashboard.buildableQty === 0 ? <span className={s.badgeDark}>Production constrained</span> : <span>Complete bikes · all parts</span>}<button onClick={() => openMaterials('zero')} aria-label="View capacity constraints">↗</button></div></article>
+          <article className={s.capacityMetric}><span>Can make now{dashboard.hasEstimatedStock && dashboard.buildableQty != null && <EstimatedMark />}</span><strong>{quantity(dashboard.buildableQty)}</strong><div>{dashboard.buildableQty === 0 ? <span className={s.badgeDark}>Production constrained</span> : <span>Complete bikes · all parts</span>}<button onClick={() => openMaterials('zero')} aria-label="View capacity constraints">↗</button></div></article>
           <article><span>Finished stock</span><strong className={dashboard.reportedFinishedGoodsQty < 0 ? s.danger : ''}>{quantity(dashboard.reportedFinishedGoodsQty)}</strong><div>Packed − sold</div></article>
           <article><span>Work in progress</span><strong className={dashboard.workInProgressQty < 0 ? s.danger : ''}>{quantity(dashboard.workInProgressQty)}</strong><div>Assembled, not packed</div></article>
           <article><span>Open orders</span><strong>{quantity(dashboard.pendingOrderQty)}</strong><div><span>{quantity(dashboard.demandPlanning.newAssemblyRequiredQty)} new assemblies needed</span></div></article>
         </section>
+        {dashboard.hasEstimatedStock && <div className={s.estimateNotice}><span><strong>Planning estimates active.</strong> Some inward weights use recorded lot averages until the updated Excel is imported.</span><button className={s.textButton} onClick={() => openMaterials('estimated')}>Review estimates <span aria-hidden="true">→</span></button></div>}
         <nav ref={sectionNav} className={s.tabs} aria-label="Cruzer sections">{(['overview', 'materials', 'activity', 'alerts'] as View[]).map(tab => <button key={tab} aria-current={view === tab ? 'page' : undefined} onClick={() => { setMaterialStatus('all'); setView(tab); }}><span>{tab[0].toUpperCase() + tab.slice(1)}</span>{tab === 'alerts' && alerts > 0 && <span className={s.tabCount}>{alerts}</span>}{tab === 'materials' && <span className={s.tabCount}>{dashboard.componentReadiness.length + dashboard.variantComponentReadiness.length}</span>}</button>)}</nav>
         <div className={s.view}>
           {view === 'overview' && <Overview dashboard={dashboard} onMaterials={openMaterials} onAlerts={() => navigateTo('alerts')} onActivity={() => navigateTo('activity')} />}

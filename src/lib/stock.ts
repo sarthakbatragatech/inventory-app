@@ -6,6 +6,7 @@ import { listOrderPortalPendingOrders } from '@/lib/order-pending';
 import { getSupabaseInventoryServerClient } from '@/lib/supabase';
 import { loadAllRows } from '@/lib/supabase-pagination';
 import { hasMassCountUnitConflict } from '@/lib/production-analytics';
+import { isPieceUnit, normalizeInwardRows, type InwardQuantityEstimate } from '@/lib/inward-estimation';
 
 export type StockComponentRow = {
   componentItemId: string;
@@ -24,6 +25,10 @@ export type StockComponentRow = {
   lastInwardUnit: string | null;
   inwardUnits: string[];
   hasUnitConflict: boolean;
+  hasEstimatedStock: boolean;
+  estimatedInwardQty: number;
+  inwardEstimates: InwardQuantityEstimate[];
+  lastInwardEstimated: boolean;
 };
 
 export type StockModelSnapshot = {
@@ -77,11 +82,16 @@ type ProductionRow = {
 };
 
 type InwardRow = {
+  id?: string;
   item_id: string;
   quantity: number | null;
   inward_date?: string | null;
   unit?: string | null;
   batch_id?: string;
+  color?: string | null;
+  raw_row_no?: number | null;
+  raw_payload?: Record<string, unknown> | null;
+  estimate?: InwardQuantityEstimate | null;
 };
 
 type BatchRecord = {
@@ -235,7 +245,8 @@ export async function listStockModels() {
 
 async function loadCurrentInwardRows(
   supabase: ReturnType<typeof getSupabaseInventoryServerClient>,
-  itemIds: string[]
+  itemIds: string[],
+  includeProvenance = false
 ) {
   if (!itemIds.length) return [] as InwardRow[];
   const batches = await loadAllRows<BatchRecord>((from, to) => supabase
@@ -251,7 +262,7 @@ async function loadCurrentInwardRows(
     for (let itemIndex = 0; itemIndex < itemIds.length; itemIndex += 100) {
       rows.push(...await loadAllRows<InwardRow>((from, to) => supabase
         .from('import_batch_rows')
-        .select('item_id, quantity, inward_date, unit, batch_id')
+        .select(includeProvenance ? 'id, item_id, quantity, inward_date, unit, batch_id, color, raw_row_no, raw_payload' : 'item_id, quantity, inward_date, unit, batch_id')
         .in('batch_id', batchIds.slice(batchIndex, batchIndex + 100))
         .in('item_id', itemIds.slice(itemIndex, itemIndex + 100))
         .order('id', { ascending: true })
@@ -520,16 +531,27 @@ async function buildStockSnapshot(input: {
   globalComponentUsage: Map<string, ComponentUsage>;
   globalComponentUsageByDate: Map<string, Map<string, number>>;
   monthSpan: number;
+  estimateInwardQuantities?: boolean;
 }) {
   const supabase = getSupabaseInventoryServerClient();
   const componentItemIds = [...input.selectedComponentUsage.keys()];
   const inwardTotals = new Map<string, number>();
   const inwardRowsByItemId = new Map<string, InwardRow[]>();
-  const [latestReconciliationByItemId, stockAdjustmentsByItemId, inwardRows] = await Promise.all([
+  const [latestReconciliationByItemId, stockAdjustmentsByItemId, recordedInwardRows] = await Promise.all([
     loadLatestReconciliationByItemIds(supabase, componentItemIds),
     loadStockAdjustmentsByItemIds(supabase, componentItemIds),
-    loadCurrentInwardRows(supabase, componentItemIds),
+    loadCurrentInwardRows(supabase, componentItemIds, input.estimateInwardQuantities),
   ]);
+  // A planning-only overlay: keep imported quantities intact so corrected Excel rows
+  // replace estimates on the next read, without a balancing stock adjustment.
+  const componentUsage = [...input.selectedComponentUsage.values()];
+  const canonicalColorByItemId = new Map(componentUsage.flatMap((component) => {
+    const color = component.componentSku.match(/-(RED|WHITE|BLUE|GREEN|BROWN|BLACK)$/i)?.[1];
+    return color ? [[component.componentItemId, color] as const] : [];
+  }));
+  const inwardRows = input.estimateInwardQuantities
+    ? normalizeInwardRows(recordedInwardRows, new Set(componentUsage.filter((component) => isPieceUnit(component.unit)).map((component) => component.componentItemId)), canonicalColorByItemId)
+    : recordedInwardRows;
 
   if (componentItemIds.length > 0) {
     for (const row of (inwardRows ?? []) as InwardRow[]) {
@@ -546,11 +568,13 @@ async function buildStockSnapshot(input: {
       const inwardQty = inwardTotals.get(component.componentItemId) ?? 0;
       const componentInwardRows = inwardRowsByItemId.get(component.componentItemId) ?? [];
       const latestReconciliation = latestReconciliationByItemId.get(component.componentItemId);
-      const inwardUnits = [...new Set(componentInwardRows.map((row) => normalizeDisplayUnit(row.unit ?? null)).filter((unit): unit is string => Boolean(unit)))];
+      const inwardUnits = [...new Set([...recordedInwardRows.filter((row) => row.item_id === component.componentItemId), ...componentInwardRows].map((row) => normalizeDisplayUnit(row.unit ?? null)).filter((unit): unit is string => Boolean(unit)))];
       const balanceInwardRows = latestReconciliation
         ? componentInwardRows.filter((row) => row.inward_date && row.inward_date > latestReconciliation.count_date)
         : componentInwardRows;
       const hasUnitConflict = hasMassCountUnitConflict(component.unit, balanceInwardRows.map((row) => row.unit ?? null));
+      const inwardEstimates = componentInwardRows.flatMap((row) => row.estimate ? [row.estimate] : []);
+      const hasEstimatedStock = balanceInwardRows.some((row) => Boolean(row.estimate));
       const lastInwardDate = componentInwardRows.reduce<string | null>((latest, row) => {
         if (!row.inward_date) {
           return latest;
@@ -602,6 +626,10 @@ async function buildStockSnapshot(input: {
         lastInwardUnit: lastInwardUnits.length === 1 ? lastInwardUnits[0] : null,
         inwardUnits,
         hasUnitConflict,
+        hasEstimatedStock,
+        estimatedInwardQty: inwardEstimates.reduce((sum, estimate) => sum + estimate.estimatedPcs, 0),
+        inwardEstimates,
+        lastInwardEstimated: lastInwardRows.some((row) => Boolean(row.estimate)),
       };
     })
     .sort((left, right) => {
@@ -843,7 +871,7 @@ export function filterStockListItems(items: StockListItem[], filters: StockListF
   });
 }
 
-export async function getStockSnapshotByFgSku(fgSku: string) {
+export async function getStockSnapshotByFgSku(fgSku: string, options?: { estimateInwardQuantities?: boolean }) {
   const detail = await getBomDetailBySku(fgSku);
   if (!detail) {
     return null;
@@ -875,6 +903,7 @@ export async function getStockSnapshotByFgSku(fgSku: string) {
     globalComponentUsage,
     globalComponentUsageByDate,
     monthSpan,
+    estimateInwardQuantities: options?.estimateInwardQuantities,
   });
 }
 

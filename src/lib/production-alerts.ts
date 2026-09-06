@@ -66,7 +66,10 @@ export function buildProductionAlertPreview(
     `Ready stock: ${quantity(dashboard.demandPlanning.readyToDispatchQty)} bikes`,
     `Awaiting packing: ${quantity(dashboard.demandPlanning.wipAvailableQty)} bikes`,
     `New assembly needed: ${quantity(dashboard.demandPlanning.newAssemblyRequiredQty)} bikes`,
-    `Complete-bike capacity: ${quantity(dashboard.buildableQty)}`,
+    `Complete-bike capacity: ${quantity(dashboard.buildableQty)}${dashboard.hasEstimatedStock && dashboard.buildableQty !== null ? ' (provisional estimate)' : ''}`,
+    ...(dashboard.hasEstimatedStock
+      ? ['Planning estimates use recorded lot weights for unconverted kg inward. Stock and dependent capacity remain provisional until the accountant’s updated Excel is imported.']
+      : []),
     '',
     ...(actionableAlerts.length > 0
       ? actionableAlerts.slice(0, 4).map((alert) => `${alert.title}: ${alert.message}`)
