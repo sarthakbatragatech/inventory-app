@@ -1,10 +1,14 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextResponse } from 'next/server';
 import { generateFactoryStockPdfDocument } from '@/lib/factory-stock-whatsapp';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   try {
     const { pdfBytes, filename } = await generateFactoryStockPdfDocument();
     const pdfArrayBuffer = new ArrayBuffer(pdfBytes.byteLength);

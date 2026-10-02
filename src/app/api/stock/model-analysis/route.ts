@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveModelFamilies } from '@/lib/model-analysis';
 import {
@@ -18,6 +19,9 @@ function formatLoadError(error: unknown) {
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   const requestedFamily = request.nextUrl.searchParams.get('family')?.trim() || '';
   const requestedFgSku = request.nextUrl.searchParams.get('fgSku')?.trim() || '';
 

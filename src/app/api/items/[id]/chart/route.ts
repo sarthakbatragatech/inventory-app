@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextResponse } from 'next/server';
 import { selectNewestBatchPerFileName } from '@/lib/import-batches';
 import { getSupabaseServerClient } from '@/lib/supabase';
@@ -37,9 +38,12 @@ function isUuid(value: string) {
 
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const denied = await requireInventoryAdmin(_request);
+  if (denied) return denied;
+
+  const { id } = await context.params;
 
   if (!id || !isUuid(id)) {
     return NextResponse.json({ error: `invalid item id: ${id || 'missing'}` }, { status: 400 });

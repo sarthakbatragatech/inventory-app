@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveItemFamily } from '@/lib/item-family';
 import { resolveItemFamilies } from '@/lib/item-family-links';
@@ -72,6 +73,9 @@ function normalizeDefaultUnit(unit: string | null | undefined) {
 }
 
 export async function GET(req: NextRequest) {
+  const denied = await requireInventoryAdmin(req);
+  if (denied) return denied;
+
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q')?.trim().toLowerCase() || '';
   const familyFilter = searchParams.get('family')?.trim() || '';
@@ -238,6 +242,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as CreateItemRequest;
     const sku = body.sku?.trim().toUpperCase() ?? '';

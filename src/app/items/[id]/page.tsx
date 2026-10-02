@@ -1,3 +1,4 @@
+import { requireInventoryAdminPage } from '@/lib/auth/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ItemHeaderEditor } from '@/components/items/item-detail-client';
@@ -152,6 +153,8 @@ function getSupplierValueClasses(value: string) {
 }
 
 export default async function ItemPage({ params }: PageProps) {
+  await requireInventoryAdminPage();
+
   const { id } = await params;
   const supabase = getSupabaseServerClient();
 

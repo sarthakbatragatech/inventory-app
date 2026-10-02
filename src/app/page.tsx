@@ -1,3 +1,4 @@
+import { requireInventoryAdminPage } from '@/lib/auth/server';
 import { Brand } from '@/components/brand';
 
 const homeLinks = [
@@ -33,7 +34,9 @@ const homeLinks = [
   },
 ] as const;
 
-export default function HomePage() {
+export default async function HomePage() {
+  await requireInventoryAdminPage();
+
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-8 sm:px-6 sm:py-10">
       <div className="mx-auto max-w-6xl">

@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   createProductionEntry,
@@ -24,6 +25,9 @@ function requestErrorStatus(message: string) {
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   const fgSku = request.nextUrl.searchParams.get('fgSku')?.trim() || FR_CRUZER_SKU;
 
   try {
@@ -37,6 +41,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as CreateProductionRequest;
     const entry = await createProductionEntry({

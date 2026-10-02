@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase';
 import { normalizeItemName } from '@/lib/sku-normalizer';
@@ -31,6 +32,9 @@ export async function GET(
   _request: NextRequest,
   context: RouteContext<'/api/items/[id]'>
 ) {
+  const denied = await requireInventoryAdmin(_request);
+  if (denied) return denied;
+
   const { id } = await context.params;
   const supabase = getSupabaseServerClient();
 
@@ -96,6 +100,9 @@ export async function PATCH(
   request: NextRequest,
   context: RouteContext<'/api/items/[id]'>
 ) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   const { id } = await context.params;
 
   try {

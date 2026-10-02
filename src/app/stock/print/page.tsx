@@ -1,3 +1,4 @@
+import { requireInventoryAdminPage } from '@/lib/auth/server';
 import { PrintPreviewActions } from '@/components/bom/print-preview-actions';
 import { filterStockListItems, getStockListItems } from '@/lib/stock';
 
@@ -51,6 +52,8 @@ function EmptyState({ message }: { message: string }) {
 }
 
 export default async function StockPrintPage({ searchParams }: PageProps) {
+  await requireInventoryAdminPage();
+
   const params = (await searchParams) ?? {};
   const q = params.q?.trim() ?? '';
   const family = params.family?.trim() ?? '';

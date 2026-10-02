@@ -1,7 +1,11 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { filterStockListItems, getStockListItems } from '@/lib/stock';
 
 export async function GET(req: NextRequest) {
+  const denied = await requireInventoryAdmin(req);
+  if (denied) return denied;
+
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q')?.trim().toLowerCase() || '';
   const familyFilter = searchParams.get('family')?.trim() || '';

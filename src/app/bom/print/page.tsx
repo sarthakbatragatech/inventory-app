@@ -1,3 +1,4 @@
+import { requireInventoryAdminPage } from '@/lib/auth/server';
 import { PrintPreviewActions } from '@/components/bom/print-preview-actions';
 import { getBomDetailBySku, listBomModels } from '@/lib/bom';
 import { deriveModelFamilies } from '@/lib/model-analysis';
@@ -42,6 +43,8 @@ function EmptyState({ message }: { message: string }) {
 }
 
 export default async function BomPrintPage({ searchParams }: PageProps) {
+  await requireInventoryAdminPage();
+
   const params = (await searchParams) ?? {};
   const fgSku = params.fgSku?.trim().toUpperCase() ?? '';
   const family = params.family?.trim().toUpperCase() ?? '';

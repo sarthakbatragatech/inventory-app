@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteStockAdjustment } from '@/lib/reconciliation';
 
@@ -11,6 +12,9 @@ export async function DELETE(
   _request: NextRequest,
   context: RouteContext<'/api/reconciliation/adjustments/[adjustmentId]'>
 ) {
+  const denied = await requireInventoryAdmin(_request);
+  if (denied) return denied;
+
   const { adjustmentId } = await context.params;
 
   if (!adjustmentId || !isUuid(adjustmentId)) {

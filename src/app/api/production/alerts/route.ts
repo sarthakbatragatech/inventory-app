@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { FR_CRUZER_SKU, getProductionDashboard } from '@/lib/production';
 import { buildProductionAlertPreview } from '@/lib/production-alerts';
@@ -5,6 +6,9 @@ import { buildProductionAlertPreview } from '@/lib/production-alerts';
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   const fgSku = (
     request.nextUrl.searchParams.get('fgSku')?.trim() || FR_CRUZER_SKU
   ).toUpperCase();

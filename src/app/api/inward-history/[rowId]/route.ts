@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeItemName } from '@/lib/sku-normalizer';
 import { getSupabaseServerClient } from '@/lib/supabase';
@@ -43,6 +44,9 @@ export async function PUT(
   request: NextRequest,
   context: RouteContext<'/api/inward-history/[rowId]'>
 ) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   const { rowId } = await context.params;
 
   if (!rowId || !isUuid(rowId)) {

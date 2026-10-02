@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextResponse } from 'next/server';
 import { parseBomCsv } from '@/lib/bom-csv';
 import { getBomVersionById, saveBomVersion } from '@/lib/bom';
@@ -14,6 +15,9 @@ export async function POST(
   request: Request,
   context: RouteContext<'/api/bom/[versionId]/import'>
 ) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   const { versionId } = await context.params;
 
   try {

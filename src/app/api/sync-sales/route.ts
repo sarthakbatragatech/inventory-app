@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextResponse } from 'next/server';
 import { listOrderPortalSales } from '@/lib/order-sales';
 import { getSupabaseInventoryClient } from '@/lib/supabaseInventory';
@@ -170,9 +171,15 @@ async function handleSync(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   return handleSync(request);
 }
 
-export async function GET(request: Request) {
-  return handleSync(request);
+export async function GET() {
+  return NextResponse.json(
+    { error: 'Use POST to sync sales.' },
+    { status: 405, headers: { Allow: 'POST', 'Cache-Control': 'no-store' } }
+  );
 }

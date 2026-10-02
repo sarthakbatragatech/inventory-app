@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const loadModule = createRequire(import.meta.url);
@@ -29,3 +29,7 @@ function runTests(directory) {
 }
 
 runTests(join(root, 'src'));
+
+for (const filename of readdirSync(join(root, 'tests')).filter(name => name.endsWith('.test.mjs')).sort()) {
+  await import(pathToFileURL(join(root, 'tests', filename)).href);
+}

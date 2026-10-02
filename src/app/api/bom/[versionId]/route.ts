@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { saveBomVersion } from '@/lib/bom';
 
@@ -23,6 +24,9 @@ export async function PUT(
   request: NextRequest,
   context: RouteContext<'/api/bom/[versionId]'>
 ) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   const { versionId } = await context.params;
 
   try {

@@ -1,3 +1,4 @@
+import { requireInventoryAdminPage } from '@/lib/auth/server';
 import { BomManager } from '@/components/bom/bom-manager';
 import {
   listBomCatalogItems,
@@ -12,6 +13,8 @@ export default async function BomPage({
 }: {
   searchParams: Promise<{ fgSku?: string }>;
 }) {
+  await requireInventoryAdminPage();
+
   const requestedFgSku = (await searchParams).fgSku?.trim().toUpperCase() || '';
   const [catalogItems, bomModels, componentItems] = await Promise.all([
     listBomCatalogItems(),

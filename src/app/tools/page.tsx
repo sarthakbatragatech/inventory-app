@@ -1,9 +1,12 @@
+import { requireInventoryAdminPage } from '@/lib/auth/server';
 import { ImportHistoryPanel } from '@/components/tools/import-history-panel';
 import { UploadInwardPanel } from '@/components/tools/upload-inward-panel';
 
 export const dynamic = 'force-dynamic';
 
-export default function ToolsPage() {
+export default async function ToolsPage() {
+  await requireInventoryAdminPage();
+
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-6 sm:p-6">
       <div className="mx-auto max-w-7xl">

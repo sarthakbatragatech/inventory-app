@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Brand } from '@/components/brand';
+import { LogoutButton } from '@/components/auth/logout-button';
+import { getInventoryIdentity } from '@/lib/auth/server';
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
@@ -19,11 +21,12 @@ export const metadata: Metadata = {
   description: "Tycoon SKU inventory, inward uploads, and item history",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const identity = await getInventoryIdentity().catch(() => null);
   return (
     <html
       lang="en"
@@ -33,7 +36,7 @@ export default function RootLayout({
         <header className="app-header sticky top-0 z-40 border-b border-neutral-200/80 bg-white/90 backdrop-blur">
           <div className="mx-auto flex max-w-[1480px] flex-col gap-2 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
             <Brand compact />
-            <nav aria-label="Main navigation" className="flex max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap text-sm sm:gap-2 [&>a]:shrink-0">
+            {identity?.role === 'admin' ? <nav aria-label="Main navigation" className="flex max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap text-sm sm:gap-2 [&>a]:shrink-0">
               <Link
                 href="/"
                 className="rounded-full px-3 py-2 text-neutral-700 transition hover:bg-sky-100 hover:text-sky-950"
@@ -76,7 +79,8 @@ export default function RootLayout({
               >
                 Inward Data
               </Link>
-            </nav>
+            </nav> : null}
+            {identity?.role === 'admin' ? <div className="flex items-center gap-3 text-sm text-neutral-600"><span>{identity.username}</span><LogoutButton /></div> : null}
           </div>
         </header>
         <main className="flex-1">{children}</main>

@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextResponse } from 'next/server';
 import { deleteProductionEntry } from '@/lib/production';
 
@@ -5,6 +6,9 @@ export async function DELETE(
   _request: Request,
   context: RouteContext<'/api/production/[entryId]'>
 ) {
+  const denied = await requireInventoryAdmin(_request);
+  if (denied) return denied;
+
   const { entryId } = await context.params;
 
   try {

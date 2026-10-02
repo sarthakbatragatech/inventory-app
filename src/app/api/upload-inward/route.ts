@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { deriveItemFamily } from '@/lib/item-family';
@@ -557,6 +558,9 @@ async function deleteNowEmptyProcessedBatches(batchIds: string[]) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await requireInventoryAdmin(req);
+  if (denied) return denied;
+
   const supabase = getSupabaseServerClient();
   let batchId: string | null = null;
 

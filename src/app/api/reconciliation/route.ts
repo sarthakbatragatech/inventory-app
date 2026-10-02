@@ -1,3 +1,4 @@
+import { requireInventoryAdmin } from '@/lib/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { listReconciliationItems, saveReconciliationCounts } from '@/lib/reconciliation';
 
@@ -15,6 +16,9 @@ function isIsoDate(value: string) {
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   const date = request.nextUrl.searchParams.get('date')?.trim() || '';
   const q = request.nextUrl.searchParams.get('q')?.trim() || '';
   const family = request.nextUrl.searchParams.get('family')?.trim() || '';
@@ -35,6 +39,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = await requireInventoryAdmin(request);
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as SaveReconciliationRequest;
     const date = body.date?.trim() || '';
